@@ -26,6 +26,8 @@ def main():
     subprocess.run(["yt-dlp", "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best", "-o", "input.mp4", args.url], check=True)
 
     # 2. Download Bottom Video (ONLY if Brain-Rot design is selected)
+    args.bottom_file = "bottom.mp4" # Explicitly save the filename into our args bundle
+    
     if args.design == 'brain_rot' and args.bottom_url:
         print("Downloading bottom gameplay video...")
         subprocess.run(["yt-dlp", "-f", "bestvideo[ext=mp4]/best", "-o", "bottom.mp4", args.bottom_url], check=True)
