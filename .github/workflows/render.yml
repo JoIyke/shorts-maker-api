@@ -1,0 +1,40 @@
+name: Render Video Short
+
+# This tells GitHub to listen for a webhook from n8n
+on:
+  repository_dispatch:
+    types: [create_short]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install FFmpeg and Video Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          pip install yt-dlp
+
+      - name: Run Video Processor
+        run: |
+          python make_short.py \
+            --url "${{ github.event.client_payload.url }}" \
+            --start "${{ github.event.client_payload.start }}" \
+            --end "${{ github.event.client_payload.end }}" \
+            --design "${{ github.event.client_payload.design }}"
+
+      - name: Upload to Free Temp Storage (Transfer.sh)
+        id: upload
+        run: |
+          # This uploads the final MP4 to a free host and gives you a link
+          URL=$(curl --upload-file output.mp4 https://transfer.sh/short.mp4)
+          echo "DOWNLOAD YOUR VIDEO HERE: $URL"
+
+      - name: Save as GitHub Artifact (Backup)
+        uses: actions/upload-artifact@v4
+        with:
+          name: final-short-video
+          path: output.mp4
