@@ -20,7 +20,8 @@ jobs:
 
       - name: Save Payload to File
         run: |
-          echo '${{ toJson(github.event.client_payload) }}' > payload.json
+          # We now extract 'client_payload.data'
+          echo '${{ toJson(github.event.client_payload.data) }}' > payload.json
 
       - name: Run Video Processor
         run: |
@@ -29,7 +30,6 @@ jobs:
       - name: Send Webhook back to n8n
         if: always()
         run: |
-          curl -X POST "${{ github.event.client_payload.webhook_url }}" \
+          curl -X POST "${{ github.event.client_payload.data.webhook_url }}" \
             -F "file=@output.mp4" \
-            -F "job_id=${{ github.event.client_payload.job_id }}" \
-            -F "temp_storage_link=${{ env.TEMP_LINK }}"
+            -F "job_id=${{ github.event.client_payload.data.job_id }}"
