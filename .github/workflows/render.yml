@@ -16,6 +16,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg jq
           pip install -r requirements.txt
+          # Download Anton font for viral meme text
+          wget https://github.com/google/fonts/raw/main/ofl/anton/Anton-Regular.ttf -O font.ttf
 
       - name: Run Video Processor
         run: |
@@ -23,7 +25,10 @@ jobs:
             --url "${{ github.event.client_payload.url }}" \
             --start "${{ github.event.client_payload.start }}" \
             --end "${{ github.event.client_payload.end }}" \
-            --design "${{ github.event.client_payload.design }}"
+            --design "${{ github.event.client_payload.design }}" \
+            --top_text "${{ github.event.client_payload.top_text }}" \
+            --bottom_text "${{ github.event.client_payload.bottom_text }}" \
+            --bottom_url "${{ github.event.client_payload.bottom_url }}"
 
       - name: Upload to Free Temp Storage (File.io)
         id: upload
