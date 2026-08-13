@@ -1,54 +1,33 @@
-import os
-import subprocess
+import json
 import argparse
-
-# Import our design specialists
 from designs import crop_basic, meme_style, meme_with_text_style, brain_rot, face_track
+from utils import timeline
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--url', required=True)
-    parser.add_argument('--start', required=True)
-    parser.add_argument('--end', required=True)
-    parser.add_argument('--design', required=True)
-    
-    # New Arguments for Advanced Designs
-    parser.add_argument('--top_text', default="WAIT FOR IT") 
-    parser.add_argument('--bottom_text', default="🤯🤯🤯") 
-    parser.add_argument('--bottom_url', default="") # For Brain-Rot gameplay
-    
+    parser.add_argument('--payload_file', default='payload.json')
     args = parser.parse_args()
 
-    print(f"Starting job: {args.url} | Design: {args.design}")
+    # Load JSON Payload
+    with open(args.payload_file, 'r') as f:
+        payload = json.load(f)
 
-    # 1. Download Main Video
-    print("Downloading main video...")
-    subprocess.run(["yt-dlp", "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best", "-o", "input.mp4", args.url], check=True)
+    design_name = payload.get('design', 'crop')
+    print(f"Director Starting Job: {payload.get('job_id')} | Design: {design_name}")
 
-    # 2. Download Bottom Video (ONLY if Brain-Rot design is selected)
-    args.bottom_file = "bottom.mp4" # Explicitly save the filename into our args bundle
-    
-    if args.design == 'brain_rot' and args.bottom_url:
-        print("Downloading bottom gameplay video...")
-        subprocess.run(["yt-dlp", "-f", "bestvideo[ext=mp4]/best", "-o", "bottom.mp4", args.bottom_url], check=True)
+    # Select Design Module
+    design_map = {
+        'crop': crop_basic,
+        'meme': meme_style,
+        'meme_text': meme_with_text_style,
+        'brain_rot': brain_rot,
+        'face_track': face_track
+    }
 
-    # 3. Route to the correct design specialist
-    input_file = "input.mp4"
-    output_file = "output.mp4"
+    design_module = design_map.get(design_name, crop_basic)
 
-    if args.design == 'crop':
-        crop_basic.render(input_file, output_file, args.start, args.end, args)
-    elif args.design == 'meme':
-        meme_style.render(input_file, output_file, args.start, args.end, args)
-    elif args.design == 'meme_text':
-        meme_with_text_style.render(input_file, output_file, args.start, args.end, args)
-    elif args.design == 'brain_rot':
-        brain_rot.render(input_file, output_file, args.start, args.end, args)
-    elif args.design == 'face_track':
-        face_track.render(input_file, output_file, args.start, args.end, args)
-    else:
-        print(f"Unknown design '{args.design}'. Defaulting to basic crop.")
-        crop_basic.render(input_file, output_file, args.start, args.end, args)
+    # Run the Master Timeline Pipeline
+    timeline.process_timeline(payload, design_module)
 
 if __name__ == "__main__":
     main()
