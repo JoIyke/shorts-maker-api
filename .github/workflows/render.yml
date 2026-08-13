@@ -15,11 +15,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg jq
-          pip install yt-dlp
+          pip install -r requirements.txt
 
       - name: Run Video Processor
         run: |
-          python make_short.py \
+          python main.py \
             --url "${{ github.event.client_payload.url }}" \
             --start "${{ github.event.client_payload.start }}" \
             --end "${{ github.event.client_payload.end }}" \
