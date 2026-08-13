@@ -1,6 +1,5 @@
 name: Render Video Short
 
-# This tells GitHub to listen for a webhook from n8n
 on:
   repository_dispatch:
     types: [create_short]
@@ -15,7 +14,7 @@ jobs:
       - name: Install FFmpeg and Video Tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          sudo apt-get install -y ffmpeg jq
           pip install yt-dlp
 
       - name: Run Video Processor
@@ -28,14 +27,34 @@ jobs:
 
       - name: Upload to Free Temp Storage (File.io)
         id: upload
-        continue-on-error: true # If this fails, it won't crash the next step!
+        continue-on-error: true
         run: |
           echo "Uploading to file.io..."
-          curl -F "file=@output.mp4" https://file.io
+          # Upload the file and capture the JSON response
+          RESPONSE=$(curl -F "file=@output.mp4" https://file.io)
+          
+          # Extract just the link from the JSON using jq
+          LINK=$(echo $RESPONSE | jq -r '.link')
+          echo "TEMP_LINK=$LINK" >> $GITHUB_ENV
+          echo "Temporary link created: $LINK"
 
-      - name: Save as GitHub Artifact (Guaranteed Backup)
+      - name: Send Webhook back to n8n
+        if: always()
+        run: |
+          echo "Sending file and original data back to n8n..."
+          curl -X POST "${{ github.event.client_payload.webhook_url }}" \
+            -F "file=@output.mp4" \
+            -F "job_id=${{ github.event.client_payload.job_id }}" \
+            -F "url=${{ github.event.client_payload.url }}" \
+            -F "start=${{ github.event.client_payload.start }}" \
+            -F "end=${{ github.event.client_payload.end }}" \
+            -F "design=${{ github.event.client_payload.design }}" \
+            -F "temp_storage_link=${{ env.TEMP_LINK }}"
+
+      - name: Save as GitHub Artifact (Backup)
         uses: actions/upload-artifact@v4
-        if: always() # This forces the video to save even if the upload step fails
+        if: always()
         with:
-          name: final-short-video
+          # This dynamically names the zip file using your job_id!
+          name: final-short-${{ github.event.client_payload.job_id }}
           path: output.mp4
