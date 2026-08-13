@@ -26,15 +26,16 @@ jobs:
             --end "${{ github.event.client_payload.end }}" \
             --design "${{ github.event.client_payload.design }}"
 
-      - name: Upload to Free Temp Storage (Transfer.sh)
+      - name: Upload to Free Temp Storage (File.io)
         id: upload
+        continue-on-error: true # If this fails, it won't crash the next step!
         run: |
-          # This uploads the final MP4 to a free host and gives you a link
-          URL=$(curl --upload-file output.mp4 https://transfer.sh/short.mp4)
-          echo "DOWNLOAD YOUR VIDEO HERE: $URL"
+          echo "Uploading to file.io..."
+          curl -F "file=@output.mp4" https://file.io
 
-      - name: Save as GitHub Artifact (Backup)
+      - name: Save as GitHub Artifact (Guaranteed Backup)
         uses: actions/upload-artifact@v4
+        if: always() # This forces the video to save even if the upload step fails
         with:
           name: final-short-video
           path: output.mp4
