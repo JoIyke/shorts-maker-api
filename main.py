@@ -3,7 +3,7 @@ import subprocess
 import argparse
 
 # Import our design specialists
-from designs import crop_basic, meme_style, meme_with_text_style, brain_rot
+from designs import crop_basic, meme_style, meme_with_text_style, brain_rot, face_track
 
 def main():
     parser = argparse.ArgumentParser()
@@ -44,6 +44,8 @@ def main():
         meme_with_text_style.render(input_file, output_file, args.start, args.end, args)
     elif args.design == 'brain_rot':
         brain_rot.render(input_file, output_file, args.start, args.end, args)
+    elif args.design == 'face_track':
+        face_track.render(input_file, output_file, args.start, args.end, args)
     else:
         print(f"Unknown design '{args.design}'. Defaulting to basic crop.")
         crop_basic.render(input_file, output_file, args.start, args.end, args)
