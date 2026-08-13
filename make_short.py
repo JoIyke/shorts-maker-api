@@ -12,11 +12,12 @@ args = parser.parse_args()
 
 print(f"Starting job: {args.url} from {args.start}s to {args.end}s")
 
-# 2. Download the video using yt-dlp (handles YT links or direct MP4s)
+# 2. Download the video using yt-dlp (Bulletproof format selection)
 print("Downloading video...")
 download_cmd = [
     "yt-dlp", 
-    "-f", "bestvideo[ext=mp4]+bestaudio[m4a]/mp4", 
+    # This string safely handles YouTube split streams OR single files like Google Drive
+    "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best", 
     "-o", "input.mp4", 
     args.url
 ]
@@ -40,7 +41,7 @@ ffmpeg_cmd = [
     "-to", str(args.end),
     "-i", "input.mp4",
     "-vf", vf_filter,
-    "-c:a", "copy",
+    "-c:a", "aac",  # Changed from 'copy' to 'aac' so it works safely with Google Drive files
     "output.mp4"
 ]
 subprocess.run(ffmpeg_cmd, check=True)
