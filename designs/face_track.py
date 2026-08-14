@@ -1,6 +1,6 @@
 import cv2
-import mediapipe as mp
 import subprocess
+import mediapipe.solutions.face_detection as mp_face_detection
 
 def render(input_file, output_file, start, end, args):
     print("Executing Smart AI Face Tracking...")
@@ -8,17 +8,16 @@ def render(input_file, output_file, start, end, args):
     # 1. Open Video
     cap = cv2.VideoCapture(input_file)
     fps = cap.get(cv2.CAP_PROP_FPS) or 30
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or 1920
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 1080
     crop_w = int(height * 9 / 16)
 
     start_frame = int(float(start) * fps)
     end_frame = int(float(end) * fps)
     cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
 
-    # Initialize MediaPipe AI
-    mp_face = mp.solutions.face_detection
-    face_detection = mp_face.FaceDetection(model_selection=1, min_detection_confidence=0.5)
+    # Explicitly initialize MediaPipe AI Face Detection
+    face_detector = mp_face_detection.FaceDetection(model_selection=1, min_detection_confidence=0.5)
 
     frame_face_data = [] # Stores face locations per sample
     curr_frame = start_frame
@@ -31,7 +30,7 @@ def render(input_file, output_file, start, end, args):
 
         if (curr_frame - start_frame) % sample_rate == 0:
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            results = face_detection.process(rgb_frame)
+            results = face_detector.process(rgb_frame)
 
             if results.detections:
                 faces = []
@@ -55,9 +54,7 @@ def render(input_file, output_file, start, end, args):
 
     print(f"Smart AI Analysis Complete: Detected average of {avg_face_count} face(s).")
 
-    # -------------------------------------------------------------
     # RULE 1: 0 Faces Detected (Audience / B-Roll / Slides)
-    # -------------------------------------------------------------
     if avg_face_count == 0:
         print("Mode: Blurred Background Fallback (No faces found)")
         filter_complex = (
@@ -71,9 +68,7 @@ def render(input_file, output_file, start, end, args):
             "-map", "[vout]", "-map", "0:a", "-c:a", "aac", output_file
         ]
 
-    # -------------------------------------------------------------
     # RULE 2: 1 Face Detected (Solo Speaker)
-    # -------------------------------------------------------------
     elif avg_face_count == 1:
         print("Mode: Solo Face Tracking")
         all_x = [f[0] for f in frame_face_data if len(f) > 0]
@@ -89,9 +84,7 @@ def render(input_file, output_file, start, end, args):
             "-i", input_file, "-vf", vf_filter, "-c:a", "aac", output_file
         ]
 
-    # -------------------------------------------------------------
     # RULE 3: 2 Faces Detected (Interview / Dual Stack)
-    # -------------------------------------------------------------
     elif avg_face_count == 2:
         print("Mode: Dual Stack (Left person top, Right person bottom)")
         left_faces = [f[0] for f in frame_face_data if len(f) >= 2]
@@ -103,7 +96,6 @@ def render(input_file, output_file, start, end, args):
         x1 = max(0, min(int(avg_left * width) - (height // 2), width - height))
         x2 = max(0, min(int(avg_right * width) - (height // 2), width - height))
 
-        # Crop square around Person 1, Crop square around Person 2, stack vertically
         filter_complex = (
             f"[0:v]crop={height}:{height}:{x1}:0,scale=1080:960[top];"
             f"[0:v]crop={height}:{height}:{x2}:0,scale=1080:960[bot];"
@@ -115,12 +107,9 @@ def render(input_file, output_file, start, end, args):
             "-map", "[vout]", "-map", "0:a", "-c:a", "aac", output_file
         ]
 
-    # -------------------------------------------------------------
     # RULE 4: 3+ Faces Detected (Panel / Speaker + Group)
-    # -------------------------------------------------------------
     else:
         print("Mode: Speaker + Group Shot (Primary speaker top, full video bottom)")
-        # Primary speaker is assumed to be the center-most face
         all_faces = [f for frame in frame_face_data for f in frame]
         avg_main_face = sum(all_faces) / len(all_faces) if all_faces else 0.5
         
