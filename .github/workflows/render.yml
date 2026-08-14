@@ -18,10 +18,11 @@ jobs:
           pip install -r requirements.txt
           wget https://github.com/google/fonts/raw/main/ofl/anton/Anton-Regular.ttf -O font.ttf
 
-      - name: Save Payload to File
+      - name: Save Payload to File Safely
         run: |
-          # We now extract 'client_payload.data'
-          echo '${{ toJson(github.event.client_payload.data) }}' > payload.json
+          # Use jq to read directly from the GitHub event file on disk.
+          # This is 100% immune to quotes, apostrophes, or special characters!
+          jq '.client_payload.data' "$GITHUB_EVENT_PATH" > payload.json
 
       - name: Run Video Processor
         run: |
@@ -30,6 +31,18 @@ jobs:
       - name: Send Webhook back to n8n
         if: always()
         run: |
-          curl -X POST "${{ github.event.client_payload.data.webhook_url }}" \
-            -F "file=@output.mp4" \
-            -F "job_id=${{ github.event.client_payload.data.job_id }}"
+          # Extract values safely using jq for curl
+          WEBHOOK_URL=$(jq -r '.webhook_url' payload.json)
+          JOB_ID=$(jq -r '.job_id' payload.json)
+
+          if [ -f "output.mp4" ]; then
+            echo "Uploading output.mp4 to n8n..."
+            curl -X POST "$WEBHOOK_URL" \
+              -F "file=@output.mp4" \
+              -F "job_id=$JOB_ID"
+          else
+            echo "output.mp4 was not created. Sending error notice to n8n..."
+            curl -X POST "$WEBHOOK_URL" \
+              -F "status=error" \
+              -F "job_id=$JOB_ID"
+          fi
