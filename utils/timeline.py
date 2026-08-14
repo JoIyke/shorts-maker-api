@@ -2,6 +2,27 @@ import os
 import subprocess
 from utils import captions
 
+def parse_time(val):
+    """Safely converts timestamps to seconds, handling milliseconds if needed."""
+    if val is None:
+        return 0.0
+    val = float(val)
+    # If time is greater than 10,000, it's in milliseconds (e.g. 12000ms = 12.0s)
+    if val > 10000:
+        val = val / 1000.0
+    return val
+
+def extract_bounds(clip):
+    """Extracts start and end times from any dict format or list."""
+    if isinstance(clip, dict):
+        s = clip.get('start') if clip.get('start') is not None else (clip.get('start_time') or clip.get('start_sec') or clip.get('begin'))
+        e = clip.get('end') if clip.get('end') is not None else (clip.get('end_time') or clip.get('end_sec') or clip.get('finish'))
+    elif isinstance(clip, (list, tuple)):
+        s, e = clip[0], clip[1]
+    else:
+        s, e = 0, 0
+    return parse_time(s), parse_time(e)
+
 def process_timeline(payload, design_module):
     raw_video = "main_input.mp4"
     rendered_segments = []
@@ -14,11 +35,10 @@ def process_timeline(payload, design_module):
         payload['bottom_file'] = "bottom.mp4"
         subprocess.run(["yt-dlp", "-f", "bestvideo[ext=mp4]/best", "-o", payload['bottom_file'], payload['bottom_url']], check=True)
 
-    # Helper function to crop and render a segment using our design modules
-    def render_part(start, end, prefix):
+    def render_part(start_sec, end_sec, prefix):
         out_name = f"{prefix}_rendered.mp4"
-        design_module.render(raw_video, out_name, start, end, payload)
-        return out_name, (float(end) - float(start))
+        design_module.render(raw_video, out_name, start_sec, end_sec, payload)
+        return out_name, (end_sec - start_sec)
 
     cumulative_offset_ms = 0.0
     adjusted_words = []
@@ -26,8 +46,7 @@ def process_timeline(payload, design_module):
 
     # A. Process Hook (If provided)
     if payload.get('hook'):
-        h_start = payload['hook']['start']
-        h_end = payload['hook']['end']
+        h_start, h_end = extract_bounds(payload['hook'])
         h_file, h_dur = render_part(h_start, h_end, "hook")
         rendered_segments.append(h_file)
         cumulative_offset_ms += (h_dur * 1000)
@@ -36,28 +55,26 @@ def process_timeline(payload, design_module):
     if payload.get('intro_url'):
         intro_file = "intro_rendered.mp4"
         subprocess.run(["yt-dlp", "-f", "bestvideo[ext=mp4]/best", "-o", "raw_intro.mp4", payload['intro_url']], check=True)
-        # Format intro to 1080x1920
         subprocess.run(["ffmpeg", "-y", "-i", "raw_intro.mp4", "-vf", "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black", "-c:a", "aac", intro_file], check=True)
         rendered_segments.append(intro_file)
-        # Add intro duration to offset (assuming intro duration ~ 3s or get via ffmpeg)
 
     # C. Process Body Clips
     clips = payload.get('clips', [])
     for idx, clip in enumerate(clips):
-        c_start = clip['start']
-        c_end = clip['end']
+        c_start, c_end = extract_bounds(clip)
         c_file, c_dur = render_part(c_start, c_end, f"body_{idx}")
         rendered_segments.append(c_file)
 
-        # Filter & Adjust Word Timestamps for this specific clip
-        c_start_ms = float(c_start) * 1000
-        c_end_ms = float(c_end) * 1000
+        # Filter & Adjust Word Timestamps for this clip
+        c_start_ms = c_start * 1000.0
+        c_end_ms = c_end * 1000.0
 
         for w in raw_words:
-            if c_start_ms <= w['start'] <= c_end_ms:
-                # Calculate relative offset in new combined timeline
-                relative_start = w['start'] - c_start_ms
-                relative_end = w['end'] - c_start_ms
+            w_start = float(w['start'])
+            w_end = float(w['end'])
+            if c_start_ms <= w_start <= c_end_ms:
+                relative_start = w_start - c_start_ms
+                relative_end = w_end - c_start_ms
                 adjusted_words.append({
                     "text": w['text'],
                     "start": int(relative_start + cumulative_offset_ms),
@@ -92,7 +109,6 @@ def process_timeline(payload, design_module):
         print("Burning captions onto final 1080x1920 master video...")
         subprocess.run(["ffmpeg", "-y", "-i", stitched_file, "-vf", f"ass={sub_file}", "-c:a", "copy", final_output], check=True)
     else:
-        # If no words/captions, output the stitched file directly
         os.rename(stitched_file, final_output)
 
     print("Pipeline Complete! Output ready.")
