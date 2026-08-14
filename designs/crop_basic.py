@@ -2,7 +2,9 @@ import subprocess
 
 def render(input_file, output_file, start, end, args):
     print("Applying Basic Crop Design...")
-    vf_filter = "crop=ih*9/16:ih"
+    
+    # Safely scale to cover 1080x1920 then center-crop, working on ANY input resolution
+    vf_filter = "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920"
     
     ffmpeg_cmd = [
         "ffmpeg", "-y",
