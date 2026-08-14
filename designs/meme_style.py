@@ -2,8 +2,9 @@ import subprocess
 
 def render(input_file, output_file, start, end, args):
     print("Applying Meme Style Design...")
-    # Creates a 1080x1080 square with black bars
-    vf_filter = "scale=1080:-1,pad=1080:1080:(ow-iw)/2:(oh-ih)/2:black"
+    
+    # Safely scale inside 1080x1080 box, then pad to square
+    vf_filter = "scale=1080:1080:force_original_aspect_ratio=decrease,pad=1080:1080:(ow-iw)/2:(oh-ih)/2:black"
     
     ffmpeg_cmd = [
         "ffmpeg", "-y",
