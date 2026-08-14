@@ -11,17 +11,24 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Install FFmpeg, Fonts, and Tools
+      # Set up Python with automatic pip caching!
+      - name: Set up Python with Caching
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install FFmpeg, Fonts, and Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg jq
           pip install -r requirements.txt
-          wget https://github.com/google/fonts/raw/main/ofl/anton/Anton-Regular.ttf -O font.ttf
+          if [ ! -f "font.ttf" ]; then
+            wget https://github.com/google/fonts/raw/main/ofl/anton/Anton-Regular.ttf -O font.ttf
+          fi
 
       - name: Save Payload to File Safely
         run: |
-          # Use jq to read directly from the GitHub event file on disk.
-          # This is 100% immune to quotes, apostrophes, or special characters!
           jq '.client_payload.data' "$GITHUB_EVENT_PATH" > payload.json
 
       - name: Run Video Processor
@@ -31,7 +38,6 @@ jobs:
       - name: Send Webhook back to n8n
         if: always()
         run: |
-          # Extract values safely using jq for curl
           WEBHOOK_URL=$(jq -r '.webhook_url' payload.json)
           JOB_ID=$(jq -r '.job_id' payload.json)
 
