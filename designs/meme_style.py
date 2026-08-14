@@ -1,10 +1,16 @@
 import subprocess
 
 def render(input_file, output_file, start, end, args):
-    print("Applying Meme Style Design...")
+    print("Applying Classic White Meme Design (No Text)...")
     
-    # Safely scale inside 1080x1080 box, then pad to square
-    vf_filter = "scale=1080:1080:force_original_aspect_ratio=decrease,pad=1080:1080:(ow-iw)/2:(oh-ih)/2:black"
+    # 1. Scale/crop video to 1080x1080 square
+    # 2. Pad to 1080x1920 vertical canvas with WHITE background
+    # 3. Position the square video at Y=420 (centered vertically)
+    vf_filter = (
+        "scale=1080:1080:force_original_aspect_ratio=increase,"
+        "crop=1080:1080,"
+        "pad=1080:1920:0:420:white"
+    )
     
     ffmpeg_cmd = [
         "ffmpeg", "-y",
