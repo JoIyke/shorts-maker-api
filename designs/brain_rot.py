@@ -15,7 +15,7 @@ def render(input_file, output_file, start, end, args):
         "-to", str(end),
         "-i", input_file,
         "-stream_loop", "-1", 
-        "-i", args.bottom_file",
+        "-i", args.bottom_file,
         "-filter_complex", 
         "[0:v]scale=1080:960:force_original_aspect_ratio=increase,crop=1080:960[vtop];"
         "[1:v]scale=1080:960:force_original_aspect_ratio=increase,crop=1080:960[vbot];"
