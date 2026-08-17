@@ -103,13 +103,15 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
         }
         core_c = color_map.get(color, 'yellow@0.95')
 
-        # FIXED: Slide solid blocks across the screen for flawless animation
+        # FIX: Complete the animation 0.4 seconds before the video ends to guarantee it closes!
+        anim_dur = max(1.0, total_duration - 0.4)
+
         if style == 'perimeter':
             p_total = 2 * (res_w + res_h)
-            t_top = total_duration * res_w / p_total
-            t_right = total_duration * res_h / p_total
-            t_bot = total_duration * res_w / p_total
-            t_left = total_duration * res_h / p_total
+            t_top = anim_dur * res_w / p_total
+            t_right = anim_dur * res_h / p_total
+            t_bot = anim_dur * res_w / p_total
+            t_left = anim_dur * res_h / p_total
             thick = 14
             
             filters.append(f"color=c={core_c}:s={res_w}x{thick} [c_top]")
@@ -117,21 +119,17 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
             filters.append(f"color=c={core_c}:s={res_w}x{thick} [c_bot]")
             filters.append(f"color=c={core_c}:s={thick}x{res_h} [c_left]")
             
-            # Top edge (Grows Left to Right)
             x_top = f"-{res_w}+{res_w}*min(t,{t_top})/{t_top}"
             filters.append(f"{stream_idx}[c_top]overlay=x='{x_top}':y=0:shortest=1 [v1]")
             
-            # Right edge (Grows Top to Bottom)
             x_right = f"{res_w-thick}"
             y_right = f"-{res_h}+{res_h}*min(max(t-{t_top},0),{t_right})/{t_right}"
             filters.append(f"[v1][c_right]overlay=x='{x_right}':y='{y_right}':shortest=1 [v2]")
             
-            # Bottom edge (Grows Right to Left)
             x_bot = f"{res_w}-{res_w}*min(max(t-{t_top}-{t_right},0),{t_bot})/{t_bot}"
             y_bot = f"{res_h-thick}"
             filters.append(f"[v2][c_bot]overlay=x='{x_bot}':y='{y_bot}':shortest=1 [v3]")
             
-            # Left edge (Grows Bottom to Top)
             x_left = "0"
             y_left = f"{res_h}-{res_h}*min(max(t-{t_top}-{t_right}-{t_bot},0),{t_left})/{t_left}"
             filters.append(f"[v3][c_left]overlay=x='{x_left}':y='{y_left}':shortest=1 [v_prog]")
@@ -140,7 +138,7 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
             
         else: # neon_bottom
             filters.append(f"color=c={core_c}:s={res_w}x12 [c_bot]")
-            x_bot = f"-{res_w}+{res_w}*t/{total_duration}"
+            x_bot = f"-{res_w}+{res_w}*min(t,{anim_dur})/{anim_dur}"
             filters.append(f"{stream_idx}[c_bot]overlay=x='{x_bot}':y={res_h-12}:shortest=1 [v_prog]")
             stream_idx = "[v_prog]"
 
@@ -149,7 +147,6 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
     if raw_words:
         sub_file = captions.generate_ass_subtitles(raw_words, caption_style=payload.get('caption_style', 'hormozi'), res_x=res_w, res_y=res_h)
         if sub_file and os.path.exists(sub_file):
-            # ASS filter can be chained as a simple video filter
             filters.append(f"{stream_idx}ass={sub_file} [vout]")
             stream_idx = "[vout]"
 
@@ -157,7 +154,6 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
         os.rename(input_video, output_video)
         return output_video
 
-    # If the last filter didn't map to [vout], we just map to whatever the last stream_idx is
     filter_complex = ";".join(filters)
     print(f"Applying Post-Processing Engine...")
     
