@@ -1,6 +1,7 @@
 import json
 import argparse
 from designs import crop_basic, meme_style, meme_with_text_style, brain_rot, face_track
+from designs import crop_basic, meme_style, meme_with_text_style, brain_rot, face_track, raw_cut
 from utils import timeline
 
 def main():
@@ -22,6 +23,7 @@ def main():
         'meme_text': meme_with_text_style,
         'brain_rot': brain_rot,
         'face_track': face_track
+        'raw_cut': raw_cut
     }
 
     design_module = design_map.get(design_name, crop_basic)
