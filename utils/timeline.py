@@ -91,32 +91,15 @@ def process_timeline(payload, design_module):
         rendered_segments.append(outro_file)
         segment_durations.append(3.0)
 
-    # 2. Stitch with Vibrant Transitions (Default: 'random')
+# 2. Stitch with Vibrant Transitions (Default: 'random')
     transition_style = payload.get('transition', 'random')
     stitched_file = "stitched_master.mp4"
     effects.stitch_with_transitions(rendered_segments, segment_durations, transition_type=transition_style, output_file=stitched_file)
 
-    # 3. Post-Processing: Progress Bar / Glowing Perimeter & Captions
+    # 3. Post-Processing: Progress Bar Perimeter & Captions
     total_video_duration = sum(segment_durations)
-    vf_post_chain = []
-
-    # Apply Progress Bar / Perimeter Glow (If enabled)
-    prog_filter = effects.build_progress_bar_filter(total_video_duration, payload.get('progress_bar', {}))
-    if prog_filter:
-        vf_post_chain.append(prog_filter)
-
-    # Generate and Apply Captions
-    caption_style = payload.get('caption_style', 'hormozi')
-    sub_file = captions.generate_ass_subtitles(adjusted_words, caption_style=caption_style)
-    if sub_file and os.path.exists(sub_file):
-        vf_post_chain.append(f"ass={sub_file}")
-
     final_output = "output.mp4"
-    if vf_post_chain:
-        combined_filter = ",".join(vf_post_chain)
-        print(f"Applying final post-processing overlays: {combined_filter}")
-        subprocess.run(["ffmpeg", "-y", "-i", stitched_file, "-vf", combined_filter, "-c:a", "copy", final_output], check=True)
-    else:
-        os.rename(stitched_file, final_output)
+    
+    effects.apply_post_processing(stitched_file, final_output, payload, total_video_duration)
 
     print("Pipeline Complete! Video ready.")
