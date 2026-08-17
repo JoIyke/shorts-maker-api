@@ -1,8 +1,8 @@
-name: Render Video Short
+name: Video Processing Service
 
 on:
   repository_dispatch:
-    types: [create_short]
+    types: [create_short, download_youtube]
 
 jobs:
   build:
@@ -11,27 +11,36 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # Set up Python with automatic pip caching!
       - name: Set up Python with Caching
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
           cache: 'pip'
 
-      - name: Install FFmpeg, Fonts, and Dependencies
+      - name: Install Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg jq
+          # Always keep yt-dlp updated to the latest release
+          pip install -U yt-dlp
           pip install -r requirements.txt
           if [ ! -f "font.ttf" ]; then
             wget https://github.com/google/fonts/raw/main/ofl/anton/Anton-Regular.ttf -O font.ttf
           fi
 
-      - name: Save Payload to File Safely
+      - name: Save Payload to File
         run: |
           jq '.client_payload.data' "$GITHUB_EVENT_PATH" > payload.json
 
-      - name: Run Video Processor
+      # ROUTE 1: If event is download_youtube
+      - name: Run YouTube Downloader
+        if: github.event.action == 'download_youtube'
+        run: |
+          python download_youtube.py --payload_file payload.json
+
+      # ROUTE 2: If event is create_short
+      - name: Run Short Creator
+        if: github.event.action == 'create_short'
         run: |
           python main.py --payload_file payload.json
 
