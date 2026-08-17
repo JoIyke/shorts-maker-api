@@ -1,23 +1,32 @@
 import os
 import subprocess
 import urllib.request
-from utils import captions
+from utils import captions, effects
+
+def get_media_duration(file_path):
+    """Probes the exact duration of an audio or video file in seconds."""
+    cmd = [
+        "ffprobe", "-v", "error", 
+        "-show_entries", "format=duration", 
+        "-of", "default=noprint_wrappers=1:nokey=1", 
+        file_path
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    return float(result.stdout.strip())
 
 def render(payload, output_file="output.mp4"):
-    print("Executing Audio Slideshow Short Generator...")
+    print("Executing Audio Slideshow Short Generator with Transitions & Progress Glow...")
 
-    # 1. Determine Aspect Ratio / Resolution
+    # 1. Determine Resolution / Aspect Ratio
     aspect_ratio = payload.get('aspect_ratio', '9:16')
     if aspect_ratio == '1:1':
         res_w, res_h = 1080, 1080
     elif aspect_ratio == '16:9':
         res_w, res_h = 1920, 1080
-    else:  # Default 9:16 vertical
+    else:  # Default 9:16
         res_w, res_h = 1080, 1920
 
-    print(f"Target resolution: {res_w}x{res_h} ({aspect_ratio})")
-
-    # 2. Download the Pre-Cut Audio / Media File
+    # 2. Download Media Audio
     audio_file = "input_audio.mp4"
     print("Downloading audio media...")
     subprocess.run([
@@ -27,34 +36,48 @@ def render(payload, output_file="output.mp4"):
         payload['url']
     ], check=True)
 
+    # Get exact audio duration so the video never cuts early
+    total_audio_duration = get_media_duration(audio_file)
+    print(f"Total audio duration: {total_audio_duration:.2f}s")
+
     # 3. Process Each Image Slide
     slides = payload.get('slides', [])
     rendered_slides = []
+    slide_durations = []
+    
+    transition_style = payload.get('transition', 'random')
+    trans_dur = 0.4 if effects.get_transition_choice(transition_style) != 'none' else 0.0
 
-    print(f"Processing {len(slides)} image slides...")
+    print(f"Processing {len(slides)} image slides with transition: {transition_style}...")
+    
     for idx, slide in enumerate(slides):
         img_url = slide.get('image_url')
         start = float(slide.get('start', 0.0))
         end = float(slide.get('end', 0.0))
-        duration = max(0.1, end - start)
+        
+        # If this is the last slide, make sure it reaches the full audio duration
+        if idx == len(slides) - 1 and end < total_audio_duration:
+            end = total_audio_duration
+
+        base_duration = max(0.5, end - start)
+        
+        # Add transition padding so the overlap doesn't shrink the total video length!
+        render_duration = base_duration + (trans_dur if (idx < len(slides) - 1 and trans_dur > 0) else 0.0)
 
         # Download image
         local_img = f"temp_img_{idx}.jpg"
-        print(f"Downloading slide {idx + 1}: {img_url} ({duration}s)")
-        
-        # Using a browser User-Agent so image hosts don't block the request
         req = urllib.request.Request(img_url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req) as response, open(local_img, 'wb') as out_file:
             out_file.write(response.read())
 
-        # Convert image into a video segment of exact duration and aspect ratio
+        # Render image to video segment
         slide_video = f"slide_{idx}.mp4"
         vf_filter = f"scale={res_w}:{res_h}:force_original_aspect_ratio=increase,crop={res_w}:{res_h}"
         
         ffmpeg_cmd = [
             "ffmpeg", "-y",
             "-loop", "1",
-            "-t", str(duration),
+            "-t", str(render_duration),
             "-i", local_img,
             "-vf", vf_filter,
             "-r", "30",
@@ -63,49 +86,57 @@ def render(payload, output_file="output.mp4"):
         ]
         subprocess.run(ffmpeg_cmd, check=True)
         rendered_slides.append(slide_video)
+        slide_durations.append(render_duration)
 
-    # 4. Stitch All Image Slides Together
-    concat_list = "slideshow_concat.txt"
-    with open(concat_list, "w") as f:
-        for s in rendered_slides:
-            f.write(f"file '{s}'\n")
+    # 4. Stitch Slides with Transitions Engine
+    slideshow_video = "slideshow_stitched.mp4"
+    effects.stitch_with_transitions(
+        rendered_slides, 
+        slide_durations, 
+        transition_type=transition_style, 
+        output_file=slideshow_video
+    )
 
-    slideshow_video = "slideshow_raw.mp4"
-    subprocess.run([
-        "ffmpeg", "-y", 
-        "-f", "concat", "-safe", "0", 
-        "-i", concat_list, 
-        "-c", "copy", 
-        slideshow_video
-    ], check=True)
-
-    # 5. Merge Stitched Slides with the Audio Track
+    # 5. Merge Stitched Slides with Audio (Without -shortest cutting)
     combined_media = "slideshow_with_audio.mp4"
     subprocess.run([
         "ffmpeg", "-y",
         "-i", slideshow_video,
         "-i", audio_file,
-        "-c:v", "copy",
+        "-c:v", "libx264",
         "-c:a", "aac",
-        "-shortest",
+        "-t", str(total_audio_duration), # Exact audio match
         combined_media
     ], check=True)
 
-    # 6. Burn Captions
+    # 6. Post-Processing: Progress Bar / Glowing Perimeter & Captions
+    vf_post_chain = []
+
+    # Apply Progress Bar / Glowing Perimeter
+    progress_config = payload.get('progress_bar', True) # Defaults to enabled
+    prog_filter = effects.build_progress_bar_filter(total_audio_duration, progress_config, res_w, res_h)
+    if prog_filter:
+        vf_post_chain.append(prog_filter)
+
+    # Generate and Apply Captions
     raw_words = payload.get('words', [])
     caption_style = payload.get('caption_style', 'hormozi')
     sub_file = captions.generate_ass_subtitles(raw_words, caption_style=caption_style, res_x=res_w, res_y=res_h)
 
     if sub_file and os.path.exists(sub_file):
-        print("Burning captions onto final audio slideshow...")
+        vf_post_chain.append(f"ass={sub_file}")
+
+    if vf_post_chain:
+        combined_filter = ",".join(vf_post_chain)
+        print(f"Applying final overlays: {combined_filter}")
         subprocess.run([
             "ffmpeg", "-y",
             "-i", combined_media,
-            "-vf", f"ass={sub_file}",
+            "-vf", combined_filter,
             "-c:a", "copy",
             output_file
         ], check=True)
     else:
         os.rename(combined_media, output_file)
 
-    print("Audio Slideshow generated successfully!")
+    print("Audio Slideshow generated successfully with all effects!")
