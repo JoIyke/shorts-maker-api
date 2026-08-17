@@ -40,17 +40,20 @@ def stitch_with_transitions(segment_files, segment_durations, transition_type="r
     for f in segment_files:
         inputs.extend(["-i", f])
 
+    # FIX: Reset PTS for every input to prevent frame-loss drift in chained xfades!
     v_filter = ""
+    for i in range(len(segment_files)):
+        v_filter += f"[{i}:v]setpts=PTS-STARTPTS[vpts{i}];"
+
     a_filter = ""
     cumulative_offset = segment_durations[0] - trans_dur
 
-    # FIXED: Random transition chosen PER CUT
     for i in range(1, len(segment_files)):
         current_t = random.choice(VIBRANT_TRANSITIONS) if transition_type == 'random' else transition_type
         print(f"Cut {i}: Applying '{current_t}' transition...")
 
-        v_in1 = "[0:v]" if i == 1 else f"[v{i-1}]"
-        v_in2 = f"[{i}:v]"
+        v_in1 = "[vpts0]" if i == 1 else f"[v{i-1}]"
+        v_in2 = f"[vpts{i}]"
         v_out = f"[v{i}]" if i < len(segment_files) - 1 else "[vout]"
         
         v_filter += f"{v_in1}{v_in2}xfade=transition={current_t}:duration={trans_dur}:offset={cumulative_offset:.2f}{v_out};"
@@ -78,7 +81,6 @@ def stitch_with_transitions(segment_files, segment_durations, transition_type="r
     subprocess.run(ffmpeg_cmd, check=True)
     return output_file
 
-
 def apply_post_processing(input_video, output_video, payload, total_duration, res_w=1080, res_h=1920):
     """Applies glowing animations and captions via complex filters."""
     filters = []
@@ -103,8 +105,8 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
         }
         core_c = color_map.get(color, 'yellow@0.95')
 
-        # FIX: Complete the animation 0.4 seconds before the video ends to guarantee it closes!
-        anim_dur = max(1.0, total_duration - 0.4)
+        # FIX: Exact duration matching
+        anim_dur = total_duration
 
         if style == 'perimeter':
             p_total = 2 * (res_w + res_h)
@@ -119,17 +121,21 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
             filters.append(f"color=c={core_c}:s={res_w}x{thick} [c_bot]")
             filters.append(f"color=c={core_c}:s={thick}x{res_h} [c_left]")
             
+            # Top edge
             x_top = f"-{res_w}+{res_w}*min(t,{t_top})/{t_top}"
             filters.append(f"{stream_idx}[c_top]overlay=x='{x_top}':y=0:shortest=1 [v1]")
             
+            # Right edge
             x_right = f"{res_w-thick}"
             y_right = f"-{res_h}+{res_h}*min(max(t-{t_top},0),{t_right})/{t_right}"
             filters.append(f"[v1][c_right]overlay=x='{x_right}':y='{y_right}':shortest=1 [v2]")
             
+            # Bottom edge
             x_bot = f"{res_w}-{res_w}*min(max(t-{t_top}-{t_right},0),{t_bot})/{t_bot}"
             y_bot = f"{res_h-thick}"
             filters.append(f"[v2][c_bot]overlay=x='{x_bot}':y='{y_bot}':shortest=1 [v3]")
             
+            # Left edge
             x_left = "0"
             y_left = f"{res_h}-{res_h}*min(max(t-{t_top}-{t_right}-{t_bot},0),{t_left})/{t_left}"
             filters.append(f"[v3][c_left]overlay=x='{x_left}':y='{y_left}':shortest=1 [v_prog]")
