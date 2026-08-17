@@ -79,8 +79,8 @@ def stitch_with_transitions(segment_files, segment_durations, transition_type="r
     return output_file
 
 
-def apply_post_processing(input_video, output_video, payload, total_duration, res_w=1080, res_h=1920):
-    """Applies glowing animations and captions via complex filters."""
+def apply_post_processing(input_video, output_video, payload, total_duration, res_w=1080, res_h=1920, logo_file=None):
+    """Applies flawless glowing animations, Logo Rider, and captions."""
     filters = []
     stream_idx = "[0:v]"
 
@@ -94,7 +94,6 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
         color = prog_config.get('color', 'random')
         if color == 'random':
             color = random.choice(PROGRESS_COLORS)
-            print(f"Random Glow Color Selected: {color}")
         color = color.lower()
 
         color_map = {
@@ -103,53 +102,55 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
         }
         core_c = color_map.get(color, 'yellow@0.95')
 
-        # FIXED: Slide solid blocks across the screen for flawless animation
         if style == 'perimeter':
             p_total = 2 * (res_w + res_h)
-            t_top = total_duration * res_w / p_total
-            t_right = total_duration * res_h / p_total
-            t_bot = total_duration * res_w / p_total
-            t_left = total_duration * res_h / p_total
             thick = 14
+            
+            # The flawless math equation: Locks animation exactly to the end of duration
+            d_expr = f"({p_total}*min(t,{total_duration})/{total_duration})"
             
             filters.append(f"color=c={core_c}:s={res_w}x{thick} [c_top]")
             filters.append(f"color=c={core_c}:s={thick}x{res_h} [c_right]")
             filters.append(f"color=c={core_c}:s={res_w}x{thick} [c_bot]")
             filters.append(f"color=c={core_c}:s={thick}x{res_h} [c_left]")
             
-            # Top edge (Grows Left to Right)
-            x_top = f"-{res_w}+{res_w}*min(t,{t_top})/{t_top}"
+            # Top edge
+            x_top = f"-{res_w}+clip({d_expr},0,{res_w})"
             filters.append(f"{stream_idx}[c_top]overlay=x='{x_top}':y=0:shortest=1 [v1]")
             
-            # Right edge (Grows Top to Bottom)
-            x_right = f"{res_w-thick}"
-            y_right = f"-{res_h}+{res_h}*min(max(t-{t_top},0),{t_right})/{t_right}"
-            filters.append(f"[v1][c_right]overlay=x='{x_right}':y='{y_right}':shortest=1 [v2]")
+            # Right edge
+            y_right = f"-{res_h}+clip({d_expr}-{res_w},0,{res_h})"
+            filters.append(f"[v1][c_right]overlay=x={res_w-thick}:y='{y_right}':shortest=1 [v2]")
             
-            # Bottom edge (Grows Right to Left)
-            x_bot = f"{res_w}-{res_w}*min(max(t-{t_top}-{t_right},0),{t_bot})/{t_bot}"
-            y_bot = f"{res_h-thick}"
-            filters.append(f"[v2][c_bot]overlay=x='{x_bot}':y='{y_bot}':shortest=1 [v3]")
+            # Bottom edge
+            x_bot = f"{res_w}-clip({d_expr}-{res_w}-{res_h},0,{res_w})"
+            filters.append(f"[v2][c_bot]overlay=x='{x_bot}':y={res_h-thick}:shortest=1 [v3]")
             
-            # Left edge (Grows Bottom to Top)
-            x_left = "0"
-            y_left = f"{res_h}-{res_h}*min(max(t-{t_top}-{t_right}-{t_bot},0),{t_left})/{t_left}"
-            filters.append(f"[v3][c_left]overlay=x='{x_left}':y='{y_left}':shortest=1 [v_prog]")
-            
+            # Left edge
+            y_left = f"{res_h}-clip({d_expr}-2*{res_w}-{res_h},0,{res_h})"
+            filters.append(f"[v3][c_left]overlay=x=0:y='{y_left}':shortest=1 [v_prog]")
             stream_idx = "[v_prog]"
-            
-        else: # neon_bottom
-            filters.append(f"color=c={core_c}:s={res_w}x12 [c_bot]")
-            x_bot = f"-{res_w}+{res_w}*t/{total_duration}"
-            filters.append(f"{stream_idx}[c_bot]overlay=x='{x_bot}':y={res_h-12}:shortest=1 [v_prog]")
-            stream_idx = "[v_prog]"
+
+            # -------------------------------------------------------------
+            # THE LOGO RIDER (Only applies if perimeter is active & logo provided)
+            # -------------------------------------------------------------
+            if logo_file:
+                logo_size = 90
+                offset = logo_size / 2
+                filters.append(f"[1:v]scale={logo_size}:{logo_size},format=rgba [logo]")
+                
+                # Magical algebra that moves the logo perfectly around the corners
+                logo_x = f"clip({d_expr},0,{res_w})-clip({d_expr}-{res_w}-{res_h},0,{res_w})"
+                logo_y = f"clip({d_expr}-{res_w},0,{res_h})-clip({d_expr}-2*{res_w}-{res_h},0,{res_h})"
+                
+                filters.append(f"{stream_idx}[logo]overlay=x='({logo_x})-{offset}':y='({logo_y})-{offset}':shortest=1 [v_logo]")
+                stream_idx = "[v_logo]"
 
     # 2. Add Subtitles
     raw_words = payload.get('words', [])
     if raw_words:
         sub_file = captions.generate_ass_subtitles(raw_words, caption_style=payload.get('caption_style', 'hormozi'), res_x=res_w, res_y=res_h)
         if sub_file and os.path.exists(sub_file):
-            # ASS filter can be chained as a simple video filter
             filters.append(f"{stream_idx}ass={sub_file} [vout]")
             stream_idx = "[vout]"
 
@@ -157,15 +158,18 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
         os.rename(input_video, output_video)
         return output_video
 
-    # If the last filter didn't map to [vout], we just map to whatever the last stream_idx is
     filter_complex = ";".join(filters)
     print(f"Applying Post-Processing Engine...")
     
-    cmd = [
-        "ffmpeg", "-y", "-i", input_video,
+    cmd = ["ffmpeg", "-y", "-i", input_video]
+    
+    if logo_file:
+        cmd.extend(["-i", logo_file]) # Map the logo as the second input [1:v]
+        
+    cmd.extend([
         "-filter_complex", filter_complex,
         "-map", stream_idx, "-map", "0:a?",
         "-c:v", "libx264", "-c:a", "copy", output_video
-    ]
+    ])
     subprocess.run(cmd, check=True)
     return output_video
