@@ -97,46 +97,15 @@ def render(payload, output_file="output.mp4"):
         output_file=slideshow_video
     )
 
-    # 5. Merge Stitched Slides with Audio (Without -shortest cutting)
+# 5. Merge Stitched Slides with Audio
     combined_media = "slideshow_with_audio.mp4"
     subprocess.run([
-        "ffmpeg", "-y",
-        "-i", slideshow_video,
-        "-i", audio_file,
-        "-c:v", "libx264",
-        "-c:a", "aac",
-        "-t", str(total_audio_duration), # Exact audio match
+        "ffmpeg", "-y", "-i", slideshow_video, "-i", audio_file,
+        "-c:v", "libx264", "-c:a", "aac", "-t", str(total_audio_duration),
         combined_media
     ], check=True)
 
-    # 6. Post-Processing: Progress Bar / Glowing Perimeter & Captions
-    vf_post_chain = []
+    # 6. Post-Processing: Progress Bar Perimeter & Captions
+    effects.apply_post_processing(combined_media, output_file, payload, total_audio_duration, res_w, res_h)
 
-    # Apply Progress Bar / Glowing Perimeter
-    progress_config = payload.get('progress_bar', True) # Defaults to enabled
-    prog_filter = effects.build_progress_bar_filter(total_audio_duration, progress_config, res_w, res_h)
-    if prog_filter:
-        vf_post_chain.append(prog_filter)
-
-    # Generate and Apply Captions
-    raw_words = payload.get('words', [])
-    caption_style = payload.get('caption_style', 'hormozi')
-    sub_file = captions.generate_ass_subtitles(raw_words, caption_style=caption_style, res_x=res_w, res_y=res_h)
-
-    if sub_file and os.path.exists(sub_file):
-        vf_post_chain.append(f"ass={sub_file}")
-
-    if vf_post_chain:
-        combined_filter = ",".join(vf_post_chain)
-        print(f"Applying final overlays: {combined_filter}")
-        subprocess.run([
-            "ffmpeg", "-y",
-            "-i", combined_media,
-            "-vf", combined_filter,
-            "-c:a", "copy",
-            output_file
-        ], check=True)
-    else:
-        os.rename(combined_media, output_file)
-
-    print("Audio Slideshow generated successfully with all effects!")
+    print("Audio Slideshow generated successfully with animated overlays!")
