@@ -78,7 +78,6 @@ def stitch_with_transitions(segment_files, segment_durations, transition_type="r
     subprocess.run(ffmpeg_cmd, check=True)
     return output_file
 
-
 def apply_post_processing(input_video, output_video, payload, total_duration, res_w=1080, res_h=1920, logo_file=None):
     """Applies flawless glowing animations, Logo Rider, and captions."""
     filters = []
@@ -106,45 +105,46 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
             p_total = 2 * (res_w + res_h)
             thick = 14
             
-            # The flawless math equation: Locks animation exactly to the end of duration
             d_expr = f"({p_total}*min(t,{total_duration})/{total_duration})"
             
-            filters.append(f"color=c={core_c}:s={res_w}x{thick} [c_top]")
-            filters.append(f"color=c={core_c}:s={thick}x{res_h} [c_right]")
-            filters.append(f"color=c={core_c}:s={res_w}x{thick} [c_bot]")
-            filters.append(f"color=c={core_c}:s={thick}x{res_h} [c_left]")
+            # FIXED: Added :d={total_duration} so they don't generate infinite frames!
+            filters.append(f"color=c={core_c}:s={res_w}x{thick}:d={total_duration} [c_top]")
+            filters.append(f"color=c={core_c}:s={thick}x{res_h}:d={total_duration} [c_right]")
+            filters.append(f"color=c={core_c}:s={res_w}x{thick}:d={total_duration} [c_bot]")
+            filters.append(f"color=c={core_c}:s={thick}x{res_h}:d={total_duration} [c_left]")
             
-            # Top edge
             x_top = f"-{res_w}+clip({d_expr},0,{res_w})"
             filters.append(f"{stream_idx}[c_top]overlay=x='{x_top}':y=0:shortest=1 [v1]")
             
-            # Right edge
             y_right = f"-{res_h}+clip({d_expr}-{res_w},0,{res_h})"
             filters.append(f"[v1][c_right]overlay=x={res_w-thick}:y='{y_right}':shortest=1 [v2]")
             
-            # Bottom edge
             x_bot = f"{res_w}-clip({d_expr}-{res_w}-{res_h},0,{res_w})"
             filters.append(f"[v2][c_bot]overlay=x='{x_bot}':y={res_h-thick}:shortest=1 [v3]")
             
-            # Left edge
             y_left = f"{res_h}-clip({d_expr}-2*{res_w}-{res_h},0,{res_h})"
             filters.append(f"[v3][c_left]overlay=x=0:y='{y_left}':shortest=1 [v_prog]")
             stream_idx = "[v_prog]"
 
-            # -------------------------------------------------------------
-            # THE LOGO RIDER (Only applies if perimeter is active & logo provided)
-            # -------------------------------------------------------------
+            # THE LOGO RIDER
             if logo_file:
                 logo_size = 90
                 offset = logo_size / 2
                 filters.append(f"[1:v]scale={logo_size}:{logo_size},format=rgba [logo]")
                 
-                # Magical algebra that moves the logo perfectly around the corners
                 logo_x = f"clip({d_expr},0,{res_w})-clip({d_expr}-{res_w}-{res_h},0,{res_w})"
                 logo_y = f"clip({d_expr}-{res_w},0,{res_h})-clip({d_expr}-2*{res_w}-{res_h},0,{res_h})"
                 
                 filters.append(f"{stream_idx}[logo]overlay=x='({logo_x})-{offset}':y='({logo_y})-{offset}':shortest=1 [v_logo]")
                 stream_idx = "[v_logo]"
+
+        else: # neon_bottom or neon_top
+            # FIXED: Added :d={total_duration}
+            filters.append(f"color=c={core_c}:s={res_w}x12:d={total_duration} [c_bot]")
+            x_bot = f"-{res_w}+{res_w}*min(t,{total_duration})/{total_duration}"
+            y_pos = res_h-12 if style == 'neon_bottom' else 0
+            filters.append(f"{stream_idx}[c_bot]overlay=x='{x_bot}':y={y_pos}:shortest=1 [v_prog]")
+            stream_idx = "[v_prog]"
 
     # 2. Add Subtitles
     raw_words = payload.get('words', [])
@@ -164,12 +164,15 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
     cmd = ["ffmpeg", "-y", "-i", input_video]
     
     if logo_file:
-        cmd.extend(["-i", logo_file]) # Map the logo as the second input [1:v]
+        # FIXED: Tell FFmpeg to loop the static logo image so it lasts the whole video!
+        cmd.extend(["-loop", "1", "-t", str(total_duration), "-i", logo_file]) 
         
     cmd.extend([
         "-filter_complex", filter_complex,
         "-map", stream_idx, "-map", "0:a?",
-        "-c:v", "libx264", "-c:a", "copy", output_video
+        "-c:v", "libx264", "-c:a", "copy", 
+        "-shortest", # FIXED: Failsafe to force stop when the audio/video ends
+        output_video
     ])
     subprocess.run(cmd, check=True)
     return output_video
