@@ -1,4 +1,5 @@
 import os
+import random
 import subprocess
 import urllib.request
 from utils import captions, effects
@@ -15,7 +16,7 @@ def get_media_duration(file_path):
     return float(result.stdout.strip())
 
 def render(payload, output_file="output.mp4"):
-    print("Executing Audio Slideshow Short Generator with Transitions & Progress Glow...")
+    print("Executing Audio Slideshow Short Generator with Transitions, Progress Glow & Zoompan...")
 
     # 1. Determine Resolution
     aspect_ratio = payload.get('aspect_ratio', '9:16')
@@ -23,7 +24,7 @@ def render(payload, output_file="output.mp4"):
         res_w, res_h = 1080, 1080
     elif aspect_ratio == '16:9':
         res_w, res_h = 1920, 1080
-    else:
+    else:  # Default 9:16
         res_w, res_h = 1080, 1920
 
     # 2. Download Audio
@@ -46,6 +47,10 @@ def render(payload, output_file="output.mp4"):
     
     transition_style = payload.get('transition', 'random')
     trans_dur = 0.0 if transition_style == 'none' else 0.4
+    
+    # Check if user enabled Zoompan (Ken Burns motion)
+    enable_zoompan = payload.get('zoompan', False) or payload.get('motion', False) or payload.get('ken_burns', False)
+    print(f"Ken Burns Zoompan Motion: {'ENABLED' if enable_zoompan else 'DISABLED'}")
 
     print(f"Processing {len(slides)} image slides with transition: {transition_style}...")
     
@@ -66,8 +71,36 @@ def render(payload, output_file="output.mp4"):
             out_file.write(response.read())
 
         slide_video = f"slide_{idx}.mp4"
-        vf_filter = f"scale={res_w}:{res_h}:force_original_aspect_ratio=increase,crop={res_w}:{res_h}"
         
+        # Build Filter: Static Crop vs Dynamic Zoompan
+        if enable_zoompan:
+            num_frames = int(render_duration * 30)
+            step = 0.15 / max(1, num_frames)
+            
+            motion_type = random.choice(['zoom_in', 'zoom_out', 'pan_left', 'pan_right', 'pan_down'])
+            print(f"Slide {idx + 1}: Applying '{motion_type}' motion...")
+            
+            if motion_type == 'zoom_in':
+                zp_expr = f"z='min(zoom+{step:.6f},1.15)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
+            elif motion_type == 'zoom_out':
+                zp_expr = f"z='max(1.15-{step:.6f}*on,1.0)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
+            elif motion_type == 'pan_left':
+                zp_expr = f"z='1.12':x='(1-(on/{num_frames}))*(iw-iw/zoom)':y='ih/2-(ih/zoom/2)'"
+            elif motion_type == 'pan_right':
+                zp_expr = f"z='1.12':x='(on/{num_frames})*(iw-iw/zoom)':y='ih/2-(ih/zoom/2)'"
+            else:  # pan_down
+                zp_expr = f"z='1.12':x='iw/2-(iw/zoom/2)':y='(on/{num_frames})*(ih-ih/zoom)'"
+
+            # Pre-scale to 2x resolution before zooming to keep quality crisp
+            vf_filter = (
+                f"scale={res_w*2}:{res_h*2}:force_original_aspect_ratio=increase,"
+                f"crop={res_w*2}:{res_h*2},"
+                f"zoompan={zp_expr}:d={num_frames}:s={res_w}x{res_h}:fps=30"
+            )
+        else:
+            # Static Crisp Crop
+            vf_filter = f"scale={res_w}:{res_h}:force_original_aspect_ratio=increase,crop={res_w}:{res_h}"
+
         ffmpeg_cmd = [
             "ffmpeg", "-y",
             "-loop", "1",
@@ -97,7 +130,7 @@ def render(payload, output_file="output.mp4"):
         "ffmpeg", "-y",
         "-i", slideshow_video,
         "-i", audio_file,
-        "-vf", "tpad=stop_mode=clone:stop_duration=5", # Guarantees video frames stay active
+        "-vf", "tpad=stop_mode=clone:stop_duration=5",
         "-c:v", "libx264",
         "-c:a", "aac",
         "-t", str(total_audio_duration),
@@ -107,4 +140,4 @@ def render(payload, output_file="output.mp4"):
     # 6. Post-Processing: Progress Bar Perimeter & Captions
     effects.apply_post_processing(combined_media, output_file, payload, total_audio_duration, res_w, res_h)
 
-    print("Audio Slideshow generated successfully with animated overlays!")
+    print("Audio Slideshow generated successfully with all effects!")
