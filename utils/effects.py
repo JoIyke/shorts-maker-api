@@ -1,5 +1,6 @@
 import random
 import subprocess
+import json
 import os
 
 VIBRANT_TRANSITIONS = [
@@ -10,6 +11,20 @@ VIBRANT_TRANSITIONS = [
 
 PROGRESS_COLORS = ['yellow', 'cyan', 'magenta', 'red', 'green', 'white']
 
+def has_audio_stream(file_path):
+    """Checks if a media file contains an audio stream."""
+    try:
+        cmd = [
+            "ffprobe", "-v", "error", 
+            "-show_entries", "stream=codec_type", 
+            "-of", "json", file_path
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        streams = json.loads(res.stdout).get("streams", [])
+        return any(s.get("codec_type") == "audio" for s in streams)
+    except Exception:
+        return False
+
 def get_transition_choice(requested_transition):
     """Returns a valid transition. If 'random' or missing, picks randomly."""
     if not requested_transition or requested_transition == 'random':
@@ -19,7 +34,7 @@ def get_transition_choice(requested_transition):
     return requested_transition
 
 def stitch_with_transitions(segment_files, segment_durations, transition_type="random", output_file="stitched_master.mp4"):
-    """Stitches multiple video segments using FFmpeg xfade and acrossfade."""
+    """Stitches video segments with xfade (and acrossfade if audio exists)."""
     if len(segment_files) == 1:
         os.rename(segment_files[0], output_file)
         return output_file
@@ -33,6 +48,9 @@ def stitch_with_transitions(segment_files, segment_durations, transition_type="r
                 f.write(f"file '{s}'\n")
         subprocess.run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", concat_list, "-c", "copy", output_file], check=True)
         return output_file
+
+    # Check if inputs have audio
+    has_audio = has_audio_stream(segment_files[0])
 
     trans_dur = 0.4  # 0.4s transition duration
     inputs = []
@@ -50,11 +68,11 @@ def stitch_with_transitions(segment_files, segment_durations, transition_type="r
         
         v_filter += f"{v_in1}{v_in2}xfade=transition={t_choice}:duration={trans_dur}:offset={cumulative_offset:.2f}{v_out};"
 
-        a_in1 = "[0:a]" if i == 1 else f"[a{i-1}]"
-        a_in2 = f"[{i}:a]"
-        a_out = f"[a{i}]" if i < len(segment_files) - 1 else "[aout]"
-        
-        a_filter += f"{a_in1}{a_in2}acrossfade=d={trans_dur}{a_out};"
+        if has_audio:
+            a_in1 = "[0:a]" if i == 1 else f"[a{i-1}]"
+            a_in2 = f"[{i}:a]"
+            a_out = f"[a{i}]" if i < len(segment_files) - 1 else "[aout]"
+            a_filter += f"{a_in1}{a_in2}acrossfade=d={trans_dur}{a_out};"
 
         if i < len(segment_files) - 1:
             cumulative_offset += (segment_durations[i] - trans_dur)
@@ -66,11 +84,17 @@ def stitch_with_transitions(segment_files, segment_durations, transition_type="r
         *inputs,
         "-filter_complex", filter_complex,
         "-map", "[vout]",
-        "-map", "[aout]",
         "-c:v", "libx264",
-        "-c:a", "aac",
         output_file
     ]
+
+    # If inputs had audio, map the audio output
+    if has_audio:
+        ffmpeg_cmd.insert(-2, "-map")
+        ffmpeg_cmd.insert(-2, "[aout]")
+        ffmpeg_cmd.insert(-2, "-c:a")
+        ffmpeg_cmd.insert(-2, "aac")
+
     subprocess.run(ffmpeg_cmd, check=True)
     return output_file
 
@@ -79,7 +103,6 @@ def build_progress_bar_filter(total_duration, config, res_w=1080, res_h=1920):
     if not config:
         return None
 
-    # Allow passing `progress_bar: true` as a simple boolean
     if isinstance(config, bool):
         if not config:
             return None
@@ -88,7 +111,6 @@ def build_progress_bar_filter(total_duration, config, res_w=1080, res_h=1920):
     if not config.get('enabled', True):
         return None
 
-    # Defaults: style = perimeter, color = random
     style = config.get('style') or 'perimeter'
     color = config.get('color') or 'random'
 
