@@ -4,7 +4,7 @@ import urllib.request
 from utils import captions, effects
 
 def get_media_duration(file_path):
-    """Probes the exact duration of an audio or video file in seconds."""
+    """Probes exact duration of an audio or video file in seconds."""
     cmd = [
         "ffprobe", "-v", "error", 
         "-show_entries", "format=duration", 
@@ -17,16 +17,16 @@ def get_media_duration(file_path):
 def render(payload, output_file="output.mp4"):
     print("Executing Audio Slideshow Short Generator with Transitions & Progress Glow...")
 
-    # 1. Determine Resolution / Aspect Ratio
+    # 1. Determine Resolution
     aspect_ratio = payload.get('aspect_ratio', '9:16')
     if aspect_ratio == '1:1':
         res_w, res_h = 1080, 1080
     elif aspect_ratio == '16:9':
         res_w, res_h = 1920, 1080
-    else:  # Default 9:16
+    else:
         res_w, res_h = 1080, 1920
 
-    # 2. Download Media Audio
+    # 2. Download Audio
     audio_file = "input_audio.mp4"
     print("Downloading audio media...")
     subprocess.run([
@@ -36,7 +36,6 @@ def render(payload, output_file="output.mp4"):
         payload['url']
     ], check=True)
 
-    # Get exact audio duration so the video never cuts early
     total_audio_duration = get_media_duration(audio_file)
     print(f"Total audio duration: {total_audio_duration:.2f}s")
 
@@ -46,7 +45,7 @@ def render(payload, output_file="output.mp4"):
     slide_durations = []
     
     transition_style = payload.get('transition', 'random')
-    trans_dur = 0.4 if transition_style == 'none' else 0.4
+    trans_dur = 0.0 if transition_style == 'none' else 0.4
 
     print(f"Processing {len(slides)} image slides with transition: {transition_style}...")
     
@@ -55,22 +54,17 @@ def render(payload, output_file="output.mp4"):
         start = float(slide.get('start', 0.0))
         end = float(slide.get('end', 0.0))
         
-        # If this is the last slide, make sure it reaches the full audio duration
         if idx == len(slides) - 1 and end < total_audio_duration:
             end = total_audio_duration
 
         base_duration = max(0.5, end - start)
-        
-        # Add transition padding so the overlap doesn't shrink the total video length!
         render_duration = base_duration + (trans_dur if (idx < len(slides) - 1 and trans_dur > 0) else 0.0)
 
-        # Download image
         local_img = f"temp_img_{idx}.jpg"
         req = urllib.request.Request(img_url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req) as response, open(local_img, 'wb') as out_file:
             out_file.write(response.read())
 
-        # Render image to video segment
         slide_video = f"slide_{idx}.mp4"
         vf_filter = f"scale={res_w}:{res_h}:force_original_aspect_ratio=increase,crop={res_w}:{res_h}"
         
@@ -97,11 +91,16 @@ def render(payload, output_file="output.mp4"):
         output_file=slideshow_video
     )
 
-# 5. Merge Stitched Slides with Audio
+    # 5. Merge Stitched Slides with Audio (Using tpad so video never freezes early!)
     combined_media = "slideshow_with_audio.mp4"
     subprocess.run([
-        "ffmpeg", "-y", "-i", slideshow_video, "-i", audio_file,
-        "-c:v", "libx264", "-c:a", "aac", "-t", str(total_audio_duration),
+        "ffmpeg", "-y",
+        "-i", slideshow_video,
+        "-i", audio_file,
+        "-vf", "tpad=stop_mode=clone:stop_duration=5", # Guarantees video frames stay active
+        "-c:v", "libx264",
+        "-c:a", "aac",
+        "-t", str(total_audio_duration),
         combined_media
     ], check=True)
 
