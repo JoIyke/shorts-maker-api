@@ -1,13 +1,8 @@
-name: Video Processing Service
+name: Render Video Short
 
 on:
   repository_dispatch:
-    types: [create_short, download_youtube]
-
-# THE NUCLEAR SSL FIX: Forces 'requests' and 'yt-dlp' to use the server's root certificates
-env:
-  REQUESTS_CA_BUNDLE: /etc/ssl/certs/ca-certificates.crt
-  SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+    types: [create_short]
 
 jobs:
   build:
@@ -16,21 +11,18 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      # Set up Python with automatic pip caching!
       - name: Set up Python with Caching
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
           cache: 'pip'
 
-      - name: Install Dependencies
+      - name: Install FFmpeg, Fonts, and Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg jq ca-certificates
-          sudo update-ca-certificates
-          
-          pip install -U "yt-dlp[default]"
+          sudo apt-get install -y ffmpeg jq
           pip install -r requirements.txt
-          
           if [ ! -f "font.ttf" ]; then
             wget https://github.com/google/fonts/raw/main/ofl/anton/Anton-Regular.ttf -O font.ttf
           fi
@@ -39,13 +31,7 @@ jobs:
         run: |
           jq '.client_payload.data' "$GITHUB_EVENT_PATH" > payload.json
 
-      - name: Run YouTube Downloader
-        if: github.event.action == 'download_youtube'
-        run: |
-          python download_youtube.py --payload_file payload.json
-
-      - name: Run Short Creator
-        if: github.event.action == 'create_short'
+      - name: Run Video Processor
         run: |
           python main.py --payload_file payload.json
 
