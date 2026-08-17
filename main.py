@@ -22,7 +22,7 @@ def main():
         'meme': meme_style,
         'meme_text': meme_with_text_style,
         'brain_rot': brain_rot,
-        'face_track': face_track
+        'face_track': face_track,
         'raw_cut': raw_cut
     }
 
