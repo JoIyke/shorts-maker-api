@@ -1,21 +1,27 @@
 import sys
-import subprocess
+import json
 import argparse
+import ssl
+import yt_dlp
+
+# THE ULTIMATE SSL HAMMER: Forces Python to bypass all SSL certificate checks
+ssl._create_default_https_context = ssl._create_unverified_context
 
 def download_video(url, output_file="output.mp4"):
-    print(f"Downloading YouTube URL: {url}")
+    print(f"Downloading YouTube URL via native API: {url}")
     
-    # Bypass YouTube datacenter IP blocking using the Android/Web player client
-    cmd = [
-        "yt-dlp",
-        "--extractor-args", "youtube:player_client=android,web",
-        "--no-check-certificates",
-        "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-        "-o", output_file,
-        url
-    ]
+    # Configure yt-dlp natively
+    ydl_opts = {
+        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+        'outtmpl': output_file,
+        'nocheckcertificate': True,
+        'extractor_args': {'youtube': {'player_client': ['android', 'web']}}
+    }
     
-    subprocess.run(cmd, check=True)
+    # Execute download
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        ydl.download([url])
+        
     print("Download complete!")
 
 if __name__ == "__main__":
@@ -23,7 +29,6 @@ if __name__ == "__main__":
     parser.add_argument('--payload_file', default='payload.json')
     args = parser.parse_args()
 
-    import json
     with open(args.payload_file, 'r') as f:
         payload = json.load(f)
 
