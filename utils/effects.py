@@ -168,4 +168,4 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
         "-c:v", "libx264", "-c:a", "copy", output_file
     ]
     subprocess.run(cmd, check=True)
-    return output_file
+    return output_video
