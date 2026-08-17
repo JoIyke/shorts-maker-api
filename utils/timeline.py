@@ -2,13 +2,24 @@ import os
 import subprocess
 import ssl
 import yt_dlp
+import urllib3
+import requests
 from utils import captions
 
-# THE ULTIMATE SSL HAMMER
+# 1. Disable all annoying terminal warnings about insecure requests
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# 2. Force native Python SSL to bypass verification
 ssl._create_default_https_context = ssl._create_unverified_context
 
+# 3. THE NUCLEAR PATCH: Hijack 'requests' to NEVER verify SSL certificates
+old_request = requests.Session.request
+def unverified_request(self, method, url, **kwargs):
+    kwargs['verify'] = False
+    return old_request(self, method, url, **kwargs)
+requests.Session.request = unverified_request
+
 def download_with_ytdlp(url, output_path, format_str="bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"):
-    """Helper function to download videos using native yt-dlp API"""
     print(f"Downloading {url} to {output_path}")
     ydl_opts = {
         'format': format_str,
@@ -41,10 +52,8 @@ def process_timeline(payload, design_module):
     raw_video = "main_input.mp4"
     rendered_segments = []
     
-    # 1. Download Main Video natively
     download_with_ytdlp(payload['url'], raw_video)
     
-    # Download bottom gameplay video natively
     if payload.get('design') == 'brain_rot' and payload.get('bottom_url'):
         payload['bottom_file'] = "bottom.mp4"
         download_with_ytdlp(payload['bottom_url'], payload['bottom_file'], format_str="bestvideo[ext=mp4]/best")
