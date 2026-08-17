@@ -8,6 +8,8 @@ VIBRANT_TRANSITIONS = [
     'smoothleft', 'fade', 'dissolve'
 ]
 
+PROGRESS_COLORS = ['yellow', 'cyan', 'magenta', 'red', 'green', 'white']
+
 def get_transition_choice(requested_transition):
     """Returns a valid transition. If 'random' or missing, picks randomly."""
     if not requested_transition or requested_transition == 'random':
@@ -19,14 +21,12 @@ def get_transition_choice(requested_transition):
 def stitch_with_transitions(segment_files, segment_durations, transition_type="random", output_file="stitched_master.mp4"):
     """Stitches multiple video segments using FFmpeg xfade and acrossfade."""
     if len(segment_files) == 1:
-        # Single clip: fast copy
         os.rename(segment_files[0], output_file)
         return output_file
 
     t_choice = get_transition_choice(transition_type)
 
     if t_choice == 'none':
-        # Hard cut: use fast concat demuxer
         concat_list = "concat_list.txt"
         with open(concat_list, "w") as f:
             for s in segment_files:
@@ -34,7 +34,6 @@ def stitch_with_transitions(segment_files, segment_durations, transition_type="r
         subprocess.run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", concat_list, "-c", "copy", output_file], check=True)
         return output_file
 
-    # Build complex xfade filtergraph
     trans_dur = 0.4  # 0.4s transition duration
     inputs = []
     for f in segment_files:
@@ -76,12 +75,29 @@ def stitch_with_transitions(segment_files, segment_durations, transition_type="r
     return output_file
 
 def build_progress_bar_filter(total_duration, config, res_w=1080, res_h=1920):
-    """Generates FFmpeg drawbox filter for glowing progress bars or perimeter tracer."""
-    if not config or not config.get('enabled', False):
+    """Generates FFmpeg drawbox filter with 'perimeter' and 'random' color defaults."""
+    if not config:
         return None
 
-    style = config.get('style', 'neon_bottom')
-    color = config.get('color', 'yellow').lower()
+    # Allow passing `progress_bar: true` as a simple boolean
+    if isinstance(config, bool):
+        if not config:
+            return None
+        config = {'enabled': True}
+
+    if not config.get('enabled', True):
+        return None
+
+    # Defaults: style = perimeter, color = random
+    style = config.get('style') or 'perimeter'
+    color = config.get('color') or 'random'
+
+    if color == 'random':
+        color = random.choice(PROGRESS_COLORS)
+        print(f"Random Progress Bar Color Selected: {color}")
+    else:
+        color = color.lower()
+
     glow = config.get('glow', True)
 
     color_map = {
@@ -94,32 +110,30 @@ def build_progress_bar_filter(total_duration, config, res_w=1080, res_h=1920):
     }
     core_c, glow_c = color_map.get(color, ('yellow@0.95', 'yellow@0.35'))
 
-    # Option A: Neon Bottom Laser Bar
-    if style == 'neon_bottom':
+    # Option 1: 4-Edge Perimeter Tracer (DEFAULT)
+    if style == 'perimeter':
+        p_total = 2 * (res_w + res_h)
+        thick = 12
+        t_top = f"drawbox=x=0:y=0:w='min({res_w}, {p_total}*t/{total_duration})':h={thick}:color={core_c}:t=fill"
+        t_right = f"drawbox=x={res_w-thick}:y=0:w={thick}:h='max(0, min({res_h}, ({p_total}*t/{total_duration})-{res_w}))':color={core_c}:t=fill"
+        t_bot = f"drawbox=x='max(0, {res_w}-max(0, ({p_total}*t/{total_duration})-{res_w+res_h}))':y={res_h-thick}:w='min({res_w}, max(0, ({p_total}*t/{total_duration})-{res_w+res_h}))':h={thick}:color={core_c}:t=fill"
+        t_left = f"drawbox=x=0:y='max(0, {res_h}-max(0, ({p_total}*t/{total_duration})-{2*res_w+res_h}))':w={thick}:h='min({res_h}, max(0, ({p_total}*t/{total_duration})-{2*res_w+res_h}))':color={core_c}:t=fill"
+        return f"{t_top},{t_right},{t_bot},{t_left}"
+
+    # Option 2: Neon Bottom Laser Bar
+    elif style == 'neon_bottom':
         filters = []
         if glow:
             filters.append(f"drawbox=x=0:y={res_h-22}:w='{res_w}*t/{total_duration}':h=22:color={glow_c}:t=fill")
         filters.append(f"drawbox=x=0:y={res_h-12}:w='{res_w}*t/{total_duration}':h=12:color={core_c}:t=fill")
         return ",".join(filters)
 
-    # Option B: Neon Top Laser Bar
+    # Option 3: Neon Top Laser Bar
     elif style == 'neon_top':
         filters = []
         if glow:
             filters.append(f"drawbox=x=0:y=0:w='{res_w}*t/{total_duration}':h=22:color={glow_c}:t=fill")
         filters.append(f"drawbox=x=0:y=0:w='{res_w}*t/{total_duration}':h=12:color={core_c}:t=fill")
         return ",".join(filters)
-
-    # Option C: 4-Edge Perimeter Tracer
-    elif style == 'perimeter':
-        # Total perimeter = 2 * (1080 + 1920) = 6000px
-        p_total = 2 * (res_w + res_h)
-        thick = 12
-        # Math for edge transitions
-        t_top = f"drawbox=x=0:y=0:w='min({res_w}, {p_total}*t/{total_duration})':h={thick}:color={core_c}:t=fill"
-        t_right = f"drawbox=x={res_w-thick}:y=0:w={thick}:h='max(0, min({res_h}, ({p_total}*t/{total_duration})-{res_w}))':color={core_c}:t=fill"
-        t_bot = f"drawbox=x='max(0, {res_w}-max(0, ({p_total}*t/{total_duration})-{res_w+res_h}))':y={res_h-thick}:w='min({res_w}, max(0, ({p_total}*t/{total_duration})-{res_w+res_h}))':h={thick}:color={core_c}:t=fill"
-        t_left = f"drawbox=x=0:y='max(0, {res_h}-max(0, ({p_total}*t/{total_duration})-{2*res_w+res_h}))':w={thick}:h='min({res_h}, max(0, ({p_total}*t/{total_duration})-{2*res_w+res_h}))':color={core_c}:t=fill"
-        return f"{t_top},{t_right},{t_bot},{t_left}"
 
     return None
