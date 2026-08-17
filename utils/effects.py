@@ -165,7 +165,7 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
         "ffmpeg", "-y", "-i", input_video,
         "-filter_complex", filter_complex,
         "-map", stream_idx, "-map", "0:a?",
-        "-c:v", "libx264", "-c:a", "copy", output_file
+        "-c:v", "libx264", "-c:a", "copy", output_video
     ]
     subprocess.run(cmd, check=True)
     return output_video
