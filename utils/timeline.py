@@ -96,19 +96,10 @@ def process_timeline(payload, design_module):
     stitched_file = "stitched_master.mp4"
     effects.stitch_with_transitions(rendered_segments, segment_durations, transition_type=transition_style, output_file=stitched_file)
 
-# 3. Post-Processing: Progress Bar, Logo Rider & Captions
+    # 3. Post-Processing: Progress Bar Perimeter & Captions
     total_video_duration = sum(segment_durations)
-    
-    logo_file = None
-    if payload.get('logo_url'):
-        import urllib.request
-        print("Downloading Branding Logo...")
-        logo_file = "brand_logo.png"
-        req = urllib.request.Request(payload['logo_url'], headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(req) as response, open(logo_file, 'wb') as out_file:
-            out_file.write(response.read())
-
     final_output = "output.mp4"
-    effects.apply_post_processing(stitched_file, final_output, payload, total_video_duration, logo_file=logo_file)
+    
+    effects.apply_post_processing(stitched_file, final_output, payload, total_video_duration)
 
     print("Pipeline Complete! Video ready.")
