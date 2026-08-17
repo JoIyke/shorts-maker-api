@@ -3,14 +3,25 @@ import json
 import argparse
 import ssl
 import yt_dlp
+import urllib3
+import requests
 
-# THE ULTIMATE SSL HAMMER: Forces Python to bypass all SSL certificate checks
+# 1. Disable all annoying terminal warnings about insecure requests
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# 2. Force native Python SSL to bypass verification
 ssl._create_default_https_context = ssl._create_unverified_context
+
+# 3. THE NUCLEAR PATCH: Hijack 'requests' to NEVER verify SSL certificates
+old_request = requests.Session.request
+def unverified_request(self, method, url, **kwargs):
+    kwargs['verify'] = False
+    return old_request(self, method, url, **kwargs)
+requests.Session.request = unverified_request
 
 def download_video(url, output_file="output.mp4"):
     print(f"Downloading YouTube URL via native API: {url}")
     
-    # Configure yt-dlp natively
     ydl_opts = {
         'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
         'outtmpl': output_file,
@@ -18,7 +29,6 @@ def download_video(url, output_file="output.mp4"):
         'extractor_args': {'youtube': {'player_client': ['android', 'web']}}
     }
     
-    # Execute download
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         ydl.download([url])
         
