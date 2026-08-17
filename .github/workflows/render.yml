@@ -4,6 +4,11 @@ on:
   repository_dispatch:
     types: [create_short, download_youtube]
 
+# THE NUCLEAR SSL FIX: Forces 'requests' and 'yt-dlp' to use the server's root certificates
+env:
+  REQUESTS_CA_BUNDLE: /etc/ssl/certs/ca-certificates.crt
+  SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -17,14 +22,13 @@ jobs:
           python-version: '3.12'
           cache: 'pip'
 
-      - name: Install Dependencies and SSL Certificates
+      - name: Install Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg jq ca-certificates
           sudo update-ca-certificates
           
-          # Install yt-dlp with its full networking suite + certifi for SSL fixes
-          pip install -U "yt-dlp[default]" certifi
+          pip install -U "yt-dlp[default]"
           pip install -r requirements.txt
           
           if [ ! -f "font.ttf" ]; then
@@ -35,20 +39,14 @@ jobs:
         run: |
           jq '.client_payload.data' "$GITHUB_EVENT_PATH" > payload.json
 
-      # ROUTE 1: If event is download_youtube
       - name: Run YouTube Downloader
         if: github.event.action == 'download_youtube'
         run: |
-          # Force Python to use the certifi SSL bundle
-          export SSL_CERT_FILE=$(python -c "import certifi; print(certifi.where())")
           python download_youtube.py --payload_file payload.json
 
-      # ROUTE 2: If event is create_short
       - name: Run Short Creator
         if: github.event.action == 'create_short'
         run: |
-          # Force Python to use the certifi SSL bundle
-          export SSL_CERT_FILE=$(python -c "import certifi; print(certifi.where())")
           python main.py --payload_file payload.json
 
       - name: Send Webhook back to n8n
