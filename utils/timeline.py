@@ -96,10 +96,12 @@ def process_timeline(payload, design_module):
     stitched_file = "stitched_master.mp4"
     effects.stitch_with_transitions(rendered_segments, segment_durations, transition_type=transition_style, output_file=stitched_file)
 
-    # 3. Post-Processing: Progress Bar Perimeter & Captions
-    total_video_duration = sum(segment_durations)
-    final_output = "output.mp4"
+# 3. Post-Processing: Progress Bar Perimeter & Captions
+    # FIX: Subtract the time lost to transition overlaps!
+    overlap_duration = 0.4 if transition_style != 'none' else 0.0
+    total_video_duration = sum(segment_durations) - (max(0, len(segment_durations) - 1) * overlap_duration)
     
+    final_output = "output.mp4"
     effects.apply_post_processing(stitched_file, final_output, payload, total_video_duration)
 
     print("Pipeline Complete! Video ready.")
