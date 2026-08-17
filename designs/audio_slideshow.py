@@ -16,7 +16,7 @@ def get_media_duration(file_path):
     return float(result.stdout.strip())
 
 def render(payload, output_file="output.mp4"):
-    print("Executing Audio Slideshow Short Generator with Transitions, Progress Glow & Zoompan...")
+    print("Executing Audio Slideshow Short Generator with Fast Zoompan & Effects...")
 
     # 1. Determine Resolution
     aspect_ratio = payload.get('aspect_ratio', '9:16')
@@ -48,7 +48,6 @@ def render(payload, output_file="output.mp4"):
     transition_style = payload.get('transition', 'random')
     trans_dur = 0.0 if transition_style == 'none' else 0.4
     
-    # Check if user enabled Zoompan (Ken Burns motion)
     enable_zoompan = payload.get('zoompan', False) or payload.get('motion', False) or payload.get('ken_burns', False)
     print(f"Ken Burns Zoompan Motion: {'ENABLED' if enable_zoompan else 'DISABLED'}")
 
@@ -72,13 +71,13 @@ def render(payload, output_file="output.mp4"):
 
         slide_video = f"slide_{idx}.mp4"
         
-        # Build Filter: Static Crop vs Dynamic Zoompan
         if enable_zoompan:
+            # FIX: Native 1-input zoompan without '-loop 1' to avoid explosive looping
             num_frames = int(render_duration * 30)
             step = 0.15 / max(1, num_frames)
             
             motion_type = random.choice(['zoom_in', 'zoom_out', 'pan_left', 'pan_right', 'pan_down'])
-            print(f"Slide {idx + 1}: Applying '{motion_type}' motion...")
+            print(f"Slide {idx + 1}: Applying fast '{motion_type}' motion...")
             
             if motion_type == 'zoom_in':
                 zp_expr = f"z='min(zoom+{step:.6f},1.15)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
@@ -91,26 +90,38 @@ def render(payload, output_file="output.mp4"):
             else:  # pan_down
                 zp_expr = f"z='1.12':x='iw/2-(iw/zoom/2)':y='(on/{num_frames})*(ih-ih/zoom)'"
 
-            # Pre-scale to 2x resolution before zooming to keep quality crisp
+            # Lightweight pre-scale (only 15% larger for fast, crisp encoding)
+            pre_w = int(res_w * 1.15)
+            pre_h = int(res_h * 1.15)
             vf_filter = (
-                f"scale={res_w*2}:{res_h*2}:force_original_aspect_ratio=increase,"
-                f"crop={res_w*2}:{res_h*2},"
+                f"scale={pre_w}:{pre_h}:force_original_aspect_ratio=increase,"
+                f"crop={pre_w}:{pre_h},"
                 f"zoompan={zp_expr}:d={num_frames}:s={res_w}x{res_h}:fps=30"
             )
-        else:
-            # Static Crisp Crop
-            vf_filter = f"scale={res_w}:{res_h}:force_original_aspect_ratio=increase,crop={res_w}:{res_h}"
 
-        ffmpeg_cmd = [
-            "ffmpeg", "-y",
-            "-loop", "1",
-            "-t", str(render_duration),
-            "-i", local_img,
-            "-vf", vf_filter,
-            "-r", "30",
-            "-pix_fmt", "yuv420p",
-            slide_video
-        ]
+            ffmpeg_cmd = [
+                "ffmpeg", "-y",
+                "-i", local_img,
+                "-vf", vf_filter,
+                "-c:v", "libx264",
+                "-pix_fmt", "yuv420p",
+                slide_video
+            ]
+        else:
+            # Fast static crop
+            vf_filter = f"scale={res_w}:{res_h}:force_original_aspect_ratio=increase,crop={res_w}:{res_h}"
+            ffmpeg_cmd = [
+                "ffmpeg", "-y",
+                "-loop", "1",
+                "-t", str(render_duration),
+                "-i", local_img,
+                "-vf", vf_filter,
+                "-r", "30",
+                "-c:v", "libx264",
+                "-pix_fmt", "yuv420p",
+                slide_video
+            ]
+
         subprocess.run(ffmpeg_cmd, check=True)
         rendered_slides.append(slide_video)
         slide_durations.append(render_duration)
@@ -124,7 +135,7 @@ def render(payload, output_file="output.mp4"):
         output_file=slideshow_video
     )
 
-    # 5. Merge Stitched Slides with Audio (Using tpad so video never freezes early!)
+    # 5. Merge Stitched Slides with Audio
     combined_media = "slideshow_with_audio.mp4"
     subprocess.run([
         "ffmpeg", "-y",
@@ -140,4 +151,4 @@ def render(payload, output_file="output.mp4"):
     # 6. Post-Processing: Progress Bar Perimeter & Captions
     effects.apply_post_processing(combined_media, output_file, payload, total_audio_duration, res_w, res_h)
 
-    print("Audio Slideshow generated successfully with all effects!")
+    print("Audio Slideshow generated successfully!")
