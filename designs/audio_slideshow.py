@@ -46,7 +46,7 @@ def render(payload, output_file="output.mp4"):
     slide_durations = []
     
     transition_style = payload.get('transition', 'random')
-    trans_dur = 0.4 if effects.get_transition_choice(transition_style) != 'none' else 0.0
+    trans_dur = 0.4 if transition_style == 'none' else 0.4
 
     print(f"Processing {len(slides)} image slides with transition: {transition_style}...")
     
