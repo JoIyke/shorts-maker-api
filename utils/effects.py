@@ -104,7 +104,7 @@ def prepare_logo(logo_url, size=70):
         print(f"Warning: Failed to process logo ({e}).")
         return None
 
-def build_waveform_filter(style="random", width=920, height=240):
+def build_waveform_filter(style="random", width=460, height=240):
     """Generates dramatic, high-energy voice-reactive audio visualizers."""
     if not style or style == "random":
         style = random.choice(WAVEFORM_STYLES)
@@ -113,7 +113,7 @@ def build_waveform_filter(style="random", width=920, height=240):
         style = style.lower()
 
     # Pre-amp: Boosts audio feeding the visualizer by 3.5x for massive, punchy bounce
-    pre_amp = "volume=3.5,"
+    pre_amp = "volume=1.5,"
 
     if style == 'waves_cyan':
         # Glowing double-amplitude voice envelope
