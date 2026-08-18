@@ -104,26 +104,33 @@ def prepare_logo(logo_url, size=70):
         print(f"Warning: Failed to process logo ({e}).")
         return None
 
-def build_waveform_filter(style="random", width=860, height=160):
-    """Generates transparent, glowing audio visualizer filters."""
+def build_waveform_filter(style="random", width=920, height=240):
+    """Generates dramatic, high-energy voice-reactive audio visualizers."""
     if not style or style == "random":
         style = random.choice(WAVEFORM_STYLES)
-        print(f"Random Waveform Style Selected: '{style}'")
+        print(f"Random Dramatic Waveform Style Selected: '{style}'")
     else:
         style = style.lower()
 
-    if style == 'waves_cyan':
-        wv_gen = f"showwaves=s={width}x{height}:mode=p2p:scale=lin:draw=full:colors=0x00FFFF@0.9|0xFFFFFF@0.95"
-    elif style == 'waves_fire':
-        wv_gen = f"showwaves=s={width}x{height}:mode=p2p:scale=lin:draw=full:colors=0xFF4500@0.9|0xFFFF00@0.95"
-    elif style == 'spectrum_dots':
-        wv_gen = f"showfreqs=s={width}x{height}:mode=dot:fscale=log:ascale=sqrt:colors=0x14FF39|0x00FFFF"
-    elif style == 'ahistogram_glow':
-        wv_gen = f"ahistogram=s={width}x{height}:scale=log:color=gradient:0x00FFFF|0xFF00FF"
-    else: # bars_neon (default)
-        wv_gen = f"showfreqs=s={width}x{height}:mode=bar:fscale=log:ascale=sqrt:colors=0x00FFFF|0xFF00FF"
+    # Pre-amp: Boosts audio feeding the visualizer by 3.5x for massive, punchy bounce
+    pre_amp = "volume=3.5,"
 
-    # Uses colorkey to remove the black background, creating a floating transparent glow!
+    if style == 'waves_cyan':
+        # Glowing double-amplitude voice envelope
+        wv_gen = f"{pre_amp}showwaves=s={width}x{height}:mode=p2p:scale=cbrt:draw=full:colors=0x00FFFF@0.95|0xFFFFFF@1.0"
+    elif style == 'waves_fire':
+        # Fiery neon peak envelope
+        wv_gen = f"{pre_amp}showwaves=s={width}x{height}:mode=p2p:scale=cbrt:draw=full:colors=0xFF3300@0.95|0xFFFF00@1.0"
+    elif style == 'spectrum_dots':
+        # Voice-focused floating particle dots
+        wv_gen = f"{pre_amp}showfreqs=s={width}x{height}:mode=dot:fscale=log:fmin=80:fmax=4200:ascale=cbrt:colors=0x14FF39|0x00FFFF"
+    elif style == 'ahistogram_glow':
+        # High-intensity spectral cloud
+        wv_gen = f"{pre_amp}showwavespeaks=s={width}x{height}:mode=p2p:color=0x00FFFF|0xFF00FF"
+    else: # bars_neon (default)
+        # Voice-focused equalizer bars spanning the full width
+        wv_gen = f"{pre_amp}showfreqs=s={width}x{height}:mode=bar:fscale=log:fmin=80:fmax=4200:ascale=cbrt:colors=0x00FFFF|0xFF00FF"
+
     return f"{wv_gen},format=rgba,colorkey=0x000000:0.1:0.1[wv]"
 
 def apply_post_processing(input_video, output_video, payload, total_duration, res_w=1080, res_h=1920):
