@@ -5,7 +5,6 @@ import urllib.request
 from utils import captions, effects
 
 def get_media_duration(file_path):
-    """Probes exact duration of an audio or video file in seconds."""
     cmd = [
         "ffprobe", "-v", "error", 
         "-show_entries", "format=duration", 
@@ -16,7 +15,7 @@ def get_media_duration(file_path):
     return float(result.stdout.strip())
 
 def render(payload, output_file="output.mp4"):
-    print("Executing Audio Slideshow Short Generator with Fast Zoompan & Effects...")
+    print("Executing Audio Slideshow Short Generator with Silence Trimming & Waveforms...")
 
     # 1. Determine Resolution
     aspect_ratio = payload.get('aspect_ratio', '9:16')
@@ -27,20 +26,29 @@ def render(payload, output_file="output.mp4"):
     else:  # Default 9:16
         res_w, res_h = 1080, 1920
 
-    # 2. Download Audio
+    # 2. Download Media Audio
+    raw_audio = "raw_audio.mp4"
     audio_file = "input_audio.mp4"
     print("Downloading audio media...")
     subprocess.run([
         "yt-dlp", 
         "-f", "bestaudio[ext=m4a]/bestaudio/best", 
-        "-o", audio_file, 
+        "-o", raw_audio, 
         payload['url']
     ], check=True)
+
+    # 3. Smart Silence Removal (If requested)
+    if payload.get('remove_silence', False):
+        print("Smart Silence Trimming: Removing dead air and pauses > 0.4s...")
+        silence_filter = "silenceremove=start_periods=1:start_duration=0.1:start_threshold=-35dB:stop_periods=-1:stop_duration=1:stop_threshold=-35dB"
+        subprocess.run(["ffmpeg", "-y", "-i", raw_audio, "-af", silence_filter, "-c:a", "aac", audio_file], check=True)
+    else:
+        os.rename(raw_audio, audio_file)
 
     total_audio_duration = get_media_duration(audio_file)
     print(f"Total audio duration: {total_audio_duration:.2f}s")
 
-    # 3. Process Each Image Slide
+    # 4. Process Each Image Slide
     slides = payload.get('slides', [])
     rendered_slides = []
     slide_durations = []
@@ -49,7 +57,6 @@ def render(payload, output_file="output.mp4"):
     trans_dur = 0.0 if transition_style == 'none' else 0.4
     
     enable_zoompan = payload.get('zoompan', False) or payload.get('motion', False) or payload.get('ken_burns', False)
-    print(f"Ken Burns Zoompan Motion: {'ENABLED' if enable_zoompan else 'DISABLED'}")
 
     print(f"Processing {len(slides)} image slides with transition: {transition_style}...")
     
@@ -72,12 +79,10 @@ def render(payload, output_file="output.mp4"):
         slide_video = f"slide_{idx}.mp4"
         
         if enable_zoompan:
-            # FIX: Native 1-input zoompan without '-loop 1' to avoid explosive looping
             num_frames = int(render_duration * 30)
             step = 0.15 / max(1, num_frames)
             
             motion_type = random.choice(['zoom_in', 'zoom_out', 'pan_left', 'pan_right', 'pan_down'])
-            print(f"Slide {idx + 1}: Applying fast '{motion_type}' motion...")
             
             if motion_type == 'zoom_in':
                 zp_expr = f"z='min(zoom+{step:.6f},1.15)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
@@ -87,10 +92,9 @@ def render(payload, output_file="output.mp4"):
                 zp_expr = f"z='1.12':x='(1-(on/{num_frames}))*(iw-iw/zoom)':y='ih/2-(ih/zoom/2)'"
             elif motion_type == 'pan_right':
                 zp_expr = f"z='1.12':x='(on/{num_frames})*(iw-iw/zoom)':y='ih/2-(ih/zoom/2)'"
-            else:  # pan_down
+            else:
                 zp_expr = f"z='1.12':x='iw/2-(iw/zoom/2)':y='(on/{num_frames})*(ih-ih/zoom)'"
 
-            # Lightweight pre-scale (only 15% larger for fast, crisp encoding)
             pre_w = int(res_w * 1.15)
             pre_h = int(res_h * 1.15)
             vf_filter = (
@@ -108,7 +112,6 @@ def render(payload, output_file="output.mp4"):
                 slide_video
             ]
         else:
-            # Fast static crop
             vf_filter = f"scale={res_w}:{res_h}:force_original_aspect_ratio=increase,crop={res_w}:{res_h}"
             ffmpeg_cmd = [
                 "ffmpeg", "-y",
@@ -126,7 +129,7 @@ def render(payload, output_file="output.mp4"):
         rendered_slides.append(slide_video)
         slide_durations.append(render_duration)
 
-    # 4. Stitch Slides with Transitions Engine
+    # 5. Stitch Slides with Transitions Engine
     slideshow_video = "slideshow_stitched.mp4"
     effects.stitch_with_transitions(
         rendered_slides, 
@@ -135,7 +138,7 @@ def render(payload, output_file="output.mp4"):
         output_file=slideshow_video
     )
 
-    # 5. Merge Stitched Slides with Audio
+    # 6. Merge Stitched Slides with Audio
     combined_media = "slideshow_with_audio.mp4"
     subprocess.run([
         "ffmpeg", "-y",
@@ -148,7 +151,7 @@ def render(payload, output_file="output.mp4"):
         combined_media
     ], check=True)
 
-    # 6. Post-Processing: Progress Bar Perimeter & Captions
+    # 7. Post-Processing: Waveform, Progress Bar & Captions
     effects.apply_post_processing(combined_media, output_file, payload, total_audio_duration, res_w, res_h)
 
-    print("Audio Slideshow generated successfully!")
+    print("Audio Slideshow generated successfully with all effects!")
