@@ -92,7 +92,6 @@ def prepare_logo(logo_url, size=70):
         with urllib.request.urlopen(req) as response, open(raw_logo, 'wb') as out_file:
             out_file.write(response.read())
 
-        # Scale to size x size
         cmd = [
             "ffmpeg", "-y", "-i", raw_logo,
             "-vf", f"scale={size}:{size}:force_original_aspect_ratio=decrease,pad={size}:{size}:(ow-iw)/2:(oh-ih)/2:color=black@0",
@@ -140,29 +139,27 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
             t_left = anim_dur * res_h / p_total
             thick = 14
             
-            filters.append(f"color=c={core_c}:s={res_w}x{thick} [c_top]")
-            filters.append(f"color=c={core_c}:s={thick}x{res_h} [c_right]")
-            filters.append(f"color=c={core_c}:s={res_w}x{thick} [c_bot]")
-            filters.append(f"color=c={core_c}:s={thick}x{res_h} [c_left]")
+            # Add exact framerate and duration to color sources
+            filters.append(f"color=c={core_c}:s={res_w}x{thick}:r=30:d={total_duration} [c_top]")
+            filters.append(f"color=c={core_c}:s={thick}x{res_h}:r=30:d={total_duration} [c_right]")
+            filters.append(f"color=c={core_c}:s={res_w}x{thick}:r=30:d={total_duration} [c_bot]")
+            filters.append(f"color=c={core_c}:s={thick}x{res_h}:r=30:d={total_duration} [c_left]")
             
-            # Top edge
+            # FIX: Use eof_action=repeat instead of shortest=1 to prevent video blackouts!
             x_top = f"-{res_w}+{res_w}*min(t,{t_top})/{t_top}"
-            filters.append(f"{stream_idx}[c_top]overlay=x='{x_top}':y=0:shortest=1 [v1]")
+            filters.append(f"{stream_idx}[c_top]overlay=x='{x_top}':y=0:eof_action=repeat [v1]")
             
-            # Right edge
             x_right = f"{res_w-thick}"
             y_right = f"-{res_h}+{res_h}*min(max(t-{t_top},0),{t_right})/{t_right}"
-            filters.append(f"[v1][c_right]overlay=x='{x_right}':y='{y_right}':shortest=1 [v2]")
+            filters.append(f"[v1][c_right]overlay=x='{x_right}':y='{y_right}':eof_action=repeat [v2]")
             
-            # Bottom edge
             x_bot = f"{res_w}-{res_w}*min(max(t-{t_top}-{t_right},0),{t_bot})/{t_bot}"
             y_bot = f"{res_h-thick}"
-            filters.append(f"[v2][c_bot]overlay=x='{x_bot}':y='{y_bot}':shortest=1 [v3]")
+            filters.append(f"[v2][c_bot]overlay=x='{x_bot}':y='{y_bot}':eof_action=repeat [v3]")
             
-            # Left edge
             x_left = "0"
             y_left = f"{res_h}-{res_h}*min(max(t-{t_top}-{t_right}-{t_bot},0),{t_left})/{t_left}"
-            filters.append(f"[v3][c_left]overlay=x='{x_left}':y='{y_left}':shortest=1 [v_prog]")
+            filters.append(f"[v3][c_left]overlay=x='{x_left}':y='{y_left}':eof_action=repeat [v_prog]")
             
             stream_idx = "[v_prog]"
 
@@ -173,7 +170,7 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
                 logo_file = prepare_logo(logo_url, size=logo_size)
                 if logo_file and os.path.exists(logo_file):
                     extra_inputs.extend(["-i", logo_file])
-                    logo_input_idx = len(extra_inputs) // 2  # 1 because main input is 0
+                    logo_input_idx = len(extra_inputs) // 2
 
                     w_max = res_w - logo_size
                     h_max = res_h - logo_size
@@ -183,7 +180,6 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
                     t2 = t_top + t_right
                     t3 = t_top + t_right + t_bot
 
-                    # Continuous piecewise coordinates moving smoothly along the 4 edges
                     lx = (
                         f"if(lte(t,{t1:.3f}),min({w_max},max(0,{res_w}*t/{t_top:.3f}-{half_s})),"
                         f"if(lte(t,{t2:.3f}),{w_max},"
@@ -197,13 +193,13 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
                     )
 
                     print(f"Adding Perimeter-Riding Logo: {logo_url}")
-                    filters.append(f"{stream_idx}[{logo_input_idx}:v]overlay=x='{lx}':y='{ly}':shortest=1 [v_logo]")
+                    filters.append(f"{stream_idx}[{logo_input_idx}:v]overlay=x='{lx}':y='{ly}':eof_action=repeat [v_logo]")
                     stream_idx = "[v_logo]"
             
         else: # neon_bottom
-            filters.append(f"color=c={core_c}:s={res_w}x12 [c_bot]")
+            filters.append(f"color=c={core_c}:s={res_w}x12:r=30:d={total_duration} [c_bot]")
             x_bot = f"-{res_w}+{res_w}*min(t,{anim_dur})/{anim_dur}"
-            filters.append(f"{stream_idx}[c_bot]overlay=x='{x_bot}':y={res_h-12}:shortest=1 [v_prog]")
+            filters.append(f"{stream_idx}[c_bot]overlay=x='{x_bot}':y={res_h-12}:eof_action=repeat [v_prog]")
             stream_idx = "[v_prog]"
 
     # 3. Add Subtitles
