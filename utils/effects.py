@@ -3,7 +3,7 @@ import subprocess
 import json
 import os
 import urllib.request
-from utils import captions
+from utils import captions, emojis
 
 VIBRANT_TRANSITIONS = [
     'slideleft', 'slideright', 'circlecrop', 
@@ -82,7 +82,6 @@ def stitch_with_transitions(segment_files, segment_durations, transition_type="r
     return output_file
 
 def prepare_logo(logo_url, size=70):
-    """Downloads and formats a logo badge with rounded transparency."""
     if not logo_url:
         return None
     try:
@@ -100,11 +99,10 @@ def prepare_logo(logo_url, size=70):
         subprocess.run(cmd, check=True)
         return formatted_logo
     except Exception as e:
-        print(f"Warning: Failed to process logo ({e}). Skipping logo overlay.")
+        print(f"Warning: Failed to process logo ({e}).")
         return None
 
 def apply_post_processing(input_video, output_video, payload, total_duration, res_w=1080, res_h=1920):
-    """Applies glowing animations, riding logo badge, and captions."""
     filters = []
     stream_idx = "[0:v]"
     extra_inputs = []
@@ -139,13 +137,11 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
             t_left = anim_dur * res_h / p_total
             thick = 14
             
-            # Add exact framerate and duration to color sources
             filters.append(f"color=c={core_c}:s={res_w}x{thick}:r=30:d={total_duration} [c_top]")
             filters.append(f"color=c={core_c}:s={thick}x{res_h}:r=30:d={total_duration} [c_right]")
             filters.append(f"color=c={core_c}:s={res_w}x{thick}:r=30:d={total_duration} [c_bot]")
             filters.append(f"color=c={core_c}:s={thick}x{res_h}:r=30:d={total_duration} [c_left]")
             
-            # FIX: Use eof_action=repeat instead of shortest=1 to prevent video blackouts!
             x_top = f"-{res_w}+{res_w}*min(t,{t_top})/{t_top}"
             filters.append(f"{stream_idx}[c_top]overlay=x='{x_top}':y=0:eof_action=repeat [v1]")
             
@@ -163,7 +159,7 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
             
             stream_idx = "[v_prog]"
 
-            # 2. LOGO RIDING PERIMETER ANIMATION
+            # 2. LOGO RIDING PERIMETER
             logo_url = payload.get('logo_url') or payload.get('branding', {}).get('logo_url')
             if logo_url:
                 logo_size = int(payload.get('logo_size', 70))
@@ -192,7 +188,6 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
                         f"max(0,min({h_max},{res_h}-{res_h}*(t-{t3:.3f})/{t_left:.3f}-{half_s})))))"
                     )
 
-                    print(f"Adding Perimeter-Riding Logo: {logo_url}")
                     filters.append(f"{stream_idx}[{logo_input_idx}:v]overlay=x='{lx}':y='{ly}':eof_action=repeat [v_logo]")
                     stream_idx = "[v_logo]"
             
@@ -202,10 +197,59 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
             filters.append(f"{stream_idx}[c_bot]overlay=x='{x_bot}':y={res_h-12}:eof_action=repeat [v_prog]")
             stream_idx = "[v_prog]"
 
-    # 3. Add Subtitles
+    # 3. Clean Subtitles & Floating Emoji Stickers
     raw_words = payload.get('words', [])
     if raw_words:
-        sub_file = captions.generate_ass_subtitles(raw_words, caption_style=payload.get('caption_style', 'hormozi'), res_x=res_w, res_y=res_h)
+        sub_file, emoji_events = captions.generate_ass_subtitles(
+            raw_words, 
+            caption_style=payload.get('caption_style', 'random'), 
+            res_x=res_w, 
+            res_y=res_h
+        )
+
+        # A. Apply Floating Emoji Stickers (Pops right above the active word!)
+        if emoji_events:
+            unique_hexes = list(set([ev['hex'] for ev in emoji_events]))
+            emoji_file_map = {}
+            for h in unique_hexes:
+                f_png = emojis.fetch_emoji_png(h, size=110)
+                if f_png and os.path.exists(f_png):
+                    extra_inputs.extend(["-i", f_png])
+                    input_idx = len(extra_inputs) // 2
+                    emoji_file_map[h] = input_idx
+
+            emoji_size = 110
+            base_y = int(res_h - (res_h * 0.15) - emoji_size - 60) # Floats above text
+
+            for ev_idx, ev in enumerate(emoji_events):
+                h = ev['hex']
+                if h in emoji_file_map:
+                    in_idx = emoji_file_map[h]
+                    c_idx = ev['chunk_idx']
+                    c_len = ev['chunk_len']
+
+                    # Calculate horizontal position based on which word is in focus
+                    if c_len == 1:
+                        ex = int((res_w - emoji_size) / 2)
+                    elif c_len == 2:
+                        offset = -140 if c_idx == 0 else 140
+                        ex = int((res_w - emoji_size) / 2 + offset)
+                    else: # 3 words
+                        if c_idx == 0:
+                            offset = -220
+                        elif c_idx == 1:
+                            offset = 0
+                        else:
+                            offset = 220
+                        ex = int((res_w - emoji_size) / 2 + offset)
+
+                    s_t = ev['start']
+                    e_t = ev['end']
+                    out_tag = f"[v_em_{ev_idx}]"
+                    filters.append(f"{stream_idx}[{in_idx}:v]overlay=x={ex}:y={base_y}:enable='between(t,{s_t:.3f},{e_t:.3f})':eof_action=repeat {out_tag}")
+                    stream_idx = out_tag
+
+        # B. Burn Clean Subtitles (After emojis so text stays on top)
         if sub_file and os.path.exists(sub_file):
             filters.append(f"{stream_idx}ass={sub_file} [vout]")
             stream_idx = "[vout]"
@@ -215,7 +259,7 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
         return output_video
 
     filter_complex = ";".join(filters)
-    print(f"Applying Post-Processing Engine...")
+    print(f"Applying Post-Processing Engine with Floating Emojis...")
     
     cmd = [
         "ffmpeg", "-y", "-i", input_video,
