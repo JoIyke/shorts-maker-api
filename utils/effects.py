@@ -197,7 +197,7 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
             filters.append(f"{stream_idx}[c_bot]overlay=x='{x_bot}':y={res_h-12}:eof_action=repeat [v_prog]")
             stream_idx = "[v_prog]"
 
-    # 3. Clean Subtitles & Floating Emoji Stickers
+    # 3. Clean Subtitles & Animated Floating Emoji Stickers
     raw_words = payload.get('words', [])
     if raw_words:
         sub_file, emoji_events = captions.generate_ass_subtitles(
@@ -207,19 +207,20 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
             res_y=res_h
         )
 
-        # A. Apply Floating Emoji Stickers (Pops right above the active word!)
+        # A. Apply Floating Emoji Stickers (140px with Vertical Spring Bounce!)
         if emoji_events:
             unique_hexes = list(set([ev['hex'] for ev in emoji_events]))
             emoji_file_map = {}
             for h in unique_hexes:
-                f_png = emojis.fetch_emoji_png(h, size=110)
+                f_png = emojis.fetch_emoji_png(h, size=140)
                 if f_png and os.path.exists(f_png):
                     extra_inputs.extend(["-i", f_png])
                     input_idx = len(extra_inputs) // 2
                     emoji_file_map[h] = input_idx
 
-            emoji_size = 110
-            base_y = int(res_h - (res_h * 0.15) - emoji_size - 60) # Floats above text
+            emoji_size = 140
+            # Lifted higher: positioned with plenty of breathing room above the text
+            base_y = int(res_h - (res_h * 0.15) - emoji_size - 90)
 
             for ev_idx, ev in enumerate(emoji_events):
                 h = ev['hex']
@@ -228,28 +229,35 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
                     c_idx = ev['chunk_idx']
                     c_len = ev['chunk_len']
 
-                    # Calculate horizontal position based on which word is in focus
                     if c_len == 1:
                         ex = int((res_w - emoji_size) / 2)
                     elif c_len == 2:
-                        offset = -140 if c_idx == 0 else 140
+                        offset = -160 if c_idx == 0 else 160
                         ex = int((res_w - emoji_size) / 2 + offset)
                     else: # 3 words
                         if c_idx == 0:
-                            offset = -220
+                            offset = -240
                         elif c_idx == 1:
                             offset = 0
                         else:
-                            offset = 220
+                            offset = 240
                         ex = int((res_w - emoji_size) / 2 + offset)
 
                     s_t = ev['start']
                     e_t = ev['end']
                     out_tag = f"[v_em_{ev_idx}]"
-                    filters.append(f"{stream_idx}[{in_idx}:v]overlay=x={ex}:y={base_y}:enable='between(t,{s_t:.3f},{e_t:.3f})':eof_action=repeat {out_tag}")
+                    
+                    # DYNAMIC SPRING BOUNCE MATH: Springs up 50px and settles smoothly into place
+                    bounce_y = f"{base_y}-50*max(0,sin(min(3.14159,max(0,t-{s_t:.3f})*12.56)))*max(0,1-min(1,max(0,t-{s_t:.3f})/0.25))"
+                    
+                    filters.append(
+                        f"{stream_idx}[{in_idx}:v]overlay="
+                        f"x={ex}:y='{bounce_y}':"
+                        f"enable='between(t,{s_t:.3f},{e_t:.3f})':eof_action=repeat {out_tag}"
+                    )
                     stream_idx = out_tag
 
-        # B. Burn Clean Subtitles (After emojis so text stays on top)
+        # B. Burn Clean Subtitles (After emojis so text stays crisp on top)
         if sub_file and os.path.exists(sub_file):
             filters.append(f"{stream_idx}ass={sub_file} [vout]")
             stream_idx = "[vout]"
@@ -259,7 +267,7 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
         return output_video
 
     filter_complex = ";".join(filters)
-    print(f"Applying Post-Processing Engine with Floating Emojis...")
+    print(f"Applying Post-Processing Engine with Bouncing Emojis...")
     
     cmd = [
         "ffmpeg", "-y", "-i", input_video,
