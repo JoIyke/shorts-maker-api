@@ -20,7 +20,7 @@ def ms_to_ass_time(ms):
 
 def generate_ass_subtitles(words, caption_style=None, output_file="subtitles.ass", res_x=1080, res_y=1920):
     if not words:
-        return None
+        return None, []
 
     if not caption_style or caption_style == 'random':
         caption_style = random.choice(CAPTION_STYLES)
@@ -39,20 +39,20 @@ def generate_ass_subtitles(words, caption_style=None, output_file="subtitles.ass
         inactive_color = "&H00FFFFFF&"   # White
         outline_color = "&H00000000&"
     elif caption_style == 'beast_green':
-        highlight_color = "&H0014FF39&"  # Neon Lime Green
+        highlight_color = "&H0014FF39&"  # Neon Green
         inactive_color = "&H00FFFFFF&"
         outline_color = "&H00000000&"
     elif caption_style == 'cyber_cyan':
-        highlight_color = "&H00FFFF00&"  # Electric Cyan
+        highlight_color = "&H00FFFF00&"  # Cyan
         inactive_color = "&H00FFFFFF&"
         outline_color = "&H00000000&"
     elif caption_style in ['fire_orange', 'red_bold']:
-        highlight_color = "&H000045FF&"  # Fiery Orange
+        highlight_color = "&H000045FF&"  # Orange
         inactive_color = "&H00FFFFFF&"
         outline_color = "&H00000000&"
     elif caption_style == 'clean_minimal':
-        highlight_color = "&H00FFFFFF&"
-        inactive_color = "&H00888888&"
+        highlight_color = "&H00FFFFFF&"  # White
+        inactive_color = "&H00888888&"   # Muted Grey
         outline_color = "&H00000000&"
         outline_width = 2
         shadow_depth = 0
@@ -81,6 +81,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
 
     dialogue_lines = []
+    emoji_events = []
     chunk_size = 3
 
     for i in range(0, len(words), chunk_size):
@@ -98,20 +99,28 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             start_str = ms_to_ass_time(slice_start)
             end_str = ms_to_ass_time(slice_end)
 
+            # Check if this focused active word has a matching emoji
+            hex_code = emojis.get_emoji_hex(active_word['text'])
+            if hex_code:
+                emoji_events.append({
+                    "hex": hex_code,
+                    "start": slice_start / 1000.0,
+                    "end": slice_end / 1000.0,
+                    "chunk_idx": j,
+                    "chunk_len": len(chunk)
+                })
+
             line_parts = []
             for k, w in enumerate(chunk):
-                raw_text = str(w['text']).upper()
-                emoji_icon = emojis.get_emoji(w['text'])
-                
-                # If an emoji exists, attach it to the word
-                display_word = f"{raw_text} {emoji_icon}".strip() if emoji_icon else raw_text
+                # Clean text: ONLY uppercase letters/numbers, NO raw emoji unicode
+                raw_text = str(w['text']).upper().strip()
 
                 if k == j:
-                    # SPRING BOUNCE EFFECT: Pops in at 135% size and springs down to 100% in 120ms
-                    bounce_tag = r"{\fscx135\fscy135\t(0,120,\fscx100\fscy100)}"
-                    line_parts.append(f"{bounce_tag}{{\\c{highlight_color}}}{display_word}{{\\r}}")
+                    # SPRING POP ANIMATION: Pops in at 125% and springs to 100% in 100ms
+                    bounce_tag = r"{\fscx125\fscy125\t(0,100,\fscx100\fscy100)}"
+                    line_parts.append(f"{bounce_tag}{{\\c{highlight_color}}}{raw_text}{{\\r}}")
                 else:
-                    line_parts.append(f"{{\\c{inactive_color}}}{display_word}")
+                    line_parts.append(f"{{\\c{inactive_color}}}{raw_text}")
 
             full_line_text = " ".join(line_parts)
             dialogue_lines.append(f"Dialogue: 0,{start_str},{end_str},ShortCap,,0,0,0,,{full_line_text}")
@@ -120,5 +129,5 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         f.write(ass_header)
         f.write("\n".join(dialogue_lines))
 
-    print(f"Generated Karaoke Subtitles with Auto-Emoji Bouncing: {output_file}")
-    return output_file
+    print(f"Generated Clean Subtitles with {len(emoji_events)} Floating Emoji Events: {output_file}")
+    return output_file, emoji_events
