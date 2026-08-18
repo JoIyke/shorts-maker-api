@@ -13,6 +13,8 @@ VIBRANT_TRANSITIONS = [
 
 PROGRESS_COLORS = ['yellow', 'cyan', 'magenta', 'red', 'green', 'white']
 
+WAVEFORM_STYLES = ['bars_neon', 'waves_cyan', 'waves_fire', 'spectrum_dots', 'ahistogram_glow']
+
 def has_audio_stream(file_path):
     try:
         cmd = ["ffprobe", "-v", "error", "-show_entries", "stream=codec_type", "-of", "json", file_path]
@@ -102,6 +104,28 @@ def prepare_logo(logo_url, size=70):
         print(f"Warning: Failed to process logo ({e}).")
         return None
 
+def build_waveform_filter(style="random", width=860, height=160):
+    """Generates transparent, glowing audio visualizer filters."""
+    if not style or style == "random":
+        style = random.choice(WAVEFORM_STYLES)
+        print(f"Random Waveform Style Selected: '{style}'")
+    else:
+        style = style.lower()
+
+    if style == 'waves_cyan':
+        wv_gen = f"showwaves=s={width}x{height}:mode=p2p:scale=lin:draw=full:colors=0x00FFFF@0.9|0xFFFFFF@0.95"
+    elif style == 'waves_fire':
+        wv_gen = f"showwaves=s={width}x{height}:mode=p2p:scale=lin:draw=full:colors=0xFF4500@0.9|0xFFFF00@0.95"
+    elif style == 'spectrum_dots':
+        wv_gen = f"showfreqs=s={width}x{height}:mode=dot:fscale=log:ascale=sqrt:colors=0x14FF39|0x00FFFF"
+    elif style == 'ahistogram_glow':
+        wv_gen = f"ahistogram=s={width}x{height}:scale=log:color=gradient:0x00FFFF|0xFF00FF"
+    else: # bars_neon (default)
+        wv_gen = f"showfreqs=s={width}x{height}:mode=bar:fscale=log:ascale=sqrt:colors=0x00FFFF|0xFF00FF"
+
+    # Uses colorkey to remove the black background, creating a floating transparent glow!
+    return f"{wv_gen},format=rgba,colorkey=0x000000:0.1:0.1[wv]"
+
 def apply_post_processing(input_video, output_video, payload, total_duration, res_w=1080, res_h=1920):
     filters = []
     stream_idx = "[0:v]"
@@ -126,7 +150,6 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
             'red': 'red@0.95', 'green': 'green@0.95', 'white': 'white@0.95'
         }
         core_c = color_map.get(color, 'yellow@0.95')
-
         anim_dur = total_duration
 
         if style == 'perimeter':
@@ -197,7 +220,24 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
             filters.append(f"{stream_idx}[c_bot]overlay=x='{x_bot}':y={res_h-12}:eof_action=repeat [v_prog]")
             stream_idx = "[v_prog]"
 
-    # 3. Clean Subtitles & Animated Floating Emoji Stickers
+    # 3. Transparent Floating Audio Waveform (If requested)
+    wv_config = payload.get('waveform', False)
+    if wv_config:
+        wv_style = wv_config if isinstance(wv_config, str) else payload.get('waveform_style', 'random')
+        wv_width = int(res_w * 0.82)
+        wv_height = 160
+        wv_filter_str = build_waveform_filter(style=wv_style, width=wv_width, height=wv_height)
+        
+        filters.append(f"[0:a]{wv_filter_str}")
+        
+        # Positioned cleanly above the subtitle space
+        wv_x = f"(W-{wv_width})/2"
+        wv_y = int(res_h - (res_h * 0.15) - wv_height - 180)
+        
+        filters.append(f"{stream_idx}[wv]overlay=x='{wv_x}':y={wv_y}:eof_action=repeat [v_wave]")
+        stream_idx = "[v_wave]"
+
+    # 4. Clean Subtitles & Animated Floating Emoji Stickers
     raw_words = payload.get('words', [])
     if raw_words:
         sub_file, emoji_events = captions.generate_ass_subtitles(
@@ -207,7 +247,6 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
             res_y=res_h
         )
 
-        # A. Apply Floating Emoji Stickers (140px with Vertical Spring Bounce!)
         if emoji_events:
             unique_hexes = list(set([ev['hex'] for ev in emoji_events]))
             emoji_file_map = {}
@@ -215,66 +254,4 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
                 f_png = emojis.fetch_emoji_png(h, size=140)
                 if f_png and os.path.exists(f_png):
                     extra_inputs.extend(["-i", f_png])
-                    input_idx = len(extra_inputs) // 2
-                    emoji_file_map[h] = input_idx
-
-            emoji_size = 140
-            # Lifted higher: positioned with plenty of breathing room above the text
-            base_y = int(res_h - (res_h * 0.15) - emoji_size - 90)
-
-            for ev_idx, ev in enumerate(emoji_events):
-                h = ev['hex']
-                if h in emoji_file_map:
-                    in_idx = emoji_file_map[h]
-                    c_idx = ev['chunk_idx']
-                    c_len = ev['chunk_len']
-
-                    if c_len == 1:
-                        ex = int((res_w - emoji_size) / 2)
-                    elif c_len == 2:
-                        offset = -160 if c_idx == 0 else 160
-                        ex = int((res_w - emoji_size) / 2 + offset)
-                    else: # 3 words
-                        if c_idx == 0:
-                            offset = -240
-                        elif c_idx == 1:
-                            offset = 0
-                        else:
-                            offset = 240
-                        ex = int((res_w - emoji_size) / 2 + offset)
-
-                    s_t = ev['start']
-                    e_t = ev['end']
-                    out_tag = f"[v_em_{ev_idx}]"
-                    
-                    # DYNAMIC SPRING BOUNCE MATH: Springs up 50px and settles smoothly into place
-                    bounce_y = f"{base_y}-50*max(0,sin(min(3.14159,max(0,t-{s_t:.3f})*12.56)))*max(0,1-min(1,max(0,t-{s_t:.3f})/0.25))"
-                    
-                    filters.append(
-                        f"{stream_idx}[{in_idx}:v]overlay="
-                        f"x={ex}:y='{bounce_y}':"
-                        f"enable='between(t,{s_t:.3f},{e_t:.3f})':eof_action=repeat {out_tag}"
-                    )
-                    stream_idx = out_tag
-
-        # B. Burn Clean Subtitles (After emojis so text stays crisp on top)
-        if sub_file and os.path.exists(sub_file):
-            filters.append(f"{stream_idx}ass={sub_file} [vout]")
-            stream_idx = "[vout]"
-
-    if not filters:
-        os.rename(input_video, output_video)
-        return output_video
-
-    filter_complex = ";".join(filters)
-    print(f"Applying Post-Processing Engine with Bouncing Emojis...")
-    
-    cmd = [
-        "ffmpeg", "-y", "-i", input_video,
-        *extra_inputs,
-        "-filter_complex", filter_complex,
-        "-map", stream_idx, "-map", "0:a?",
-        "-c:v", "libx264", "-c:a", "copy", output_video
-    ]
-    subprocess.run(cmd, check=True)
-    return output_video
+                    input_idx = len(extra_in
