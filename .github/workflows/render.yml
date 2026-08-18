@@ -21,7 +21,7 @@ jobs:
       - name: Install FFmpeg, Fonts, and Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg jq
+          sudo apt-get install -y ffmpeg jq fonts-noto-color-emoji
           pip install -r requirements.txt
           if [ ! -f "font.ttf" ]; then
             wget https://github.com/google/fonts/raw/main/ofl/anton/Anton-Regular.ttf -O font.ttf
