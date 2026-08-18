@@ -11,20 +11,19 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # Set up Python with automatic pip caching!
+      # Uses fast pip caching
       - name: Set up Python with Caching
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
           cache: 'pip'
 
-      - name: Install FFmpeg, Fonts, and Dependencies
+      # NO APT-GET NEEDED! FFmpeg & jq are already pre-installed on GitHub Actions.
+      - name: Install Python Packages and Fonts (Ultra-Fast)
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg jq fonts-noto-color-emoji
           pip install -r requirements.txt
           if [ ! -f "font.ttf" ]; then
-            wget https://github.com/google/fonts/raw/main/ofl/anton/Anton-Regular.ttf -O font.ttf
+            wget -q https://github.com/google/fonts/raw/main/ofl/anton/Anton-Regular.ttf -O font.ttf
           fi
 
       - name: Save Payload to File Safely
