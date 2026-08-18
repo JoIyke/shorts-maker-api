@@ -254,4 +254,62 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
                 f_png = emojis.fetch_emoji_png(h, size=140)
                 if f_png and os.path.exists(f_png):
                     extra_inputs.extend(["-i", f_png])
-                    input_idx = len(extra_in
+                    input_idx = len(extra_inputs) // 2
+                    emoji_file_map[h] = input_idx
+
+            emoji_size = 140
+            base_y = int(res_h - (res_h * 0.15) - emoji_size - 90)
+
+            for ev_idx, ev in enumerate(emoji_events):
+                h = ev['hex']
+                if h in emoji_file_map:
+                    in_idx = emoji_file_map[h]
+                    c_idx = ev['chunk_idx']
+                    c_len = ev['chunk_len']
+
+                    if c_len == 1:
+                        ex = int((res_w - emoji_size) / 2)
+                    elif c_len == 2:
+                        offset = -160 if c_idx == 0 else 160
+                        ex = int((res_w - emoji_size) / 2 + offset)
+                    else: # 3 words
+                        if c_idx == 0:
+                            offset = -240
+                        elif c_idx == 1:
+                            offset = 0
+                        else:
+                            offset = 240
+                        ex = int((res_w - emoji_size) / 2 + offset)
+
+                    s_t = ev['start']
+                    e_t = ev['end']
+                    out_tag = f"[v_em_{ev_idx}]"
+                    bounce_y = f"{base_y}-50*max(0,sin(min(3.14159,max(0,t-{s_t:.3f})*12.56)))*max(0,1-min(1,max(0,t-{s_t:.3f})/0.25))"
+                    
+                    filters.append(
+                        f"{stream_idx}[{in_idx}:v]overlay="
+                        f"x={ex}:y='{bounce_y}':"
+                        f"enable='between(t,{s_t:.3f},{e_t:.3f})':eof_action=repeat {out_tag}"
+                    )
+                    stream_idx = out_tag
+
+        if sub_file and os.path.exists(sub_file):
+            filters.append(f"{stream_idx}ass={sub_file} [vout]")
+            stream_idx = "[vout]"
+
+    if not filters:
+        os.rename(input_video, output_video)
+        return output_video
+
+    filter_complex = ";".join(filters)
+    print(f"Applying Post-Processing Engine with Waveform & Floating Emojis...")
+    
+    cmd = [
+        "ffmpeg", "-y", "-i", input_video,
+        *extra_inputs,
+        "-filter_complex", filter_complex,
+        "-map", stream_idx, "-map", "0:a?",
+        "-c:v", "libx264", "-c:a", "copy", output_video
+    ]
+    subprocess.run(cmd, check=True)
+    return output_video
