@@ -2,6 +2,7 @@ import random
 import subprocess
 import json
 import os
+import urllib.request
 from utils import captions
 
 VIBRANT_TRANSITIONS = [
@@ -40,7 +41,6 @@ def stitch_with_transitions(segment_files, segment_durations, transition_type="r
     for f in segment_files:
         inputs.extend(["-i", f])
 
-    # FIX: Reset PTS for every input to prevent frame-loss drift in chained xfades!
     v_filter = ""
     for i in range(len(segment_files)):
         v_filter += f"[{i}:v]setpts=PTS-STARTPTS[vpts{i}];"
@@ -81,16 +81,41 @@ def stitch_with_transitions(segment_files, segment_durations, transition_type="r
     subprocess.run(ffmpeg_cmd, check=True)
     return output_file
 
+def prepare_logo(logo_url, size=70):
+    """Downloads and formats a logo badge with rounded transparency."""
+    if not logo_url:
+        return None
+    try:
+        raw_logo = "temp_raw_logo.png"
+        formatted_logo = "formatted_logo.png"
+        req = urllib.request.Request(logo_url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req) as response, open(raw_logo, 'wb') as out_file:
+            out_file.write(response.read())
+
+        # Scale to size x size
+        cmd = [
+            "ffmpeg", "-y", "-i", raw_logo,
+            "-vf", f"scale={size}:{size}:force_original_aspect_ratio=decrease,pad={size}:{size}:(ow-iw)/2:(oh-ih)/2:color=black@0",
+            "-pix_fmt", "rgba", formatted_logo
+        ]
+        subprocess.run(cmd, check=True)
+        return formatted_logo
+    except Exception as e:
+        print(f"Warning: Failed to process logo ({e}). Skipping logo overlay.")
+        return None
+
 def apply_post_processing(input_video, output_video, payload, total_duration, res_w=1080, res_h=1920):
-    """Applies glowing animations and captions via complex filters."""
+    """Applies glowing animations, riding logo badge, and captions."""
     filters = []
     stream_idx = "[0:v]"
+    extra_inputs = []
 
     # 1. Setup Progress Bar Animation
     prog_config = payload.get('progress_bar', True)
     if isinstance(prog_config, bool):
         prog_config = {'enabled': prog_config}
 
+    style = 'perimeter'
     if prog_config and prog_config.get('enabled', True):
         style = prog_config.get('style', 'perimeter')
         color = prog_config.get('color', 'random')
@@ -105,7 +130,6 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
         }
         core_c = color_map.get(color, 'yellow@0.95')
 
-        # FIX: Exact duration matching
         anim_dur = total_duration
 
         if style == 'perimeter':
@@ -141,6 +165,40 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
             filters.append(f"[v3][c_left]overlay=x='{x_left}':y='{y_left}':shortest=1 [v_prog]")
             
             stream_idx = "[v_prog]"
+
+            # 2. LOGO RIDING PERIMETER ANIMATION
+            logo_url = payload.get('logo_url') or payload.get('branding', {}).get('logo_url')
+            if logo_url:
+                logo_size = int(payload.get('logo_size', 70))
+                logo_file = prepare_logo(logo_url, size=logo_size)
+                if logo_file and os.path.exists(logo_file):
+                    extra_inputs.extend(["-i", logo_file])
+                    logo_input_idx = len(extra_inputs) // 2  # 1 because main input is 0
+
+                    w_max = res_w - logo_size
+                    h_max = res_h - logo_size
+                    half_s = logo_size // 2
+
+                    t1 = t_top
+                    t2 = t_top + t_right
+                    t3 = t_top + t_right + t_bot
+
+                    # Continuous piecewise coordinates moving smoothly along the 4 edges
+                    lx = (
+                        f"if(lte(t,{t1:.3f}),min({w_max},max(0,{res_w}*t/{t_top:.3f}-{half_s})),"
+                        f"if(lte(t,{t2:.3f}),{w_max},"
+                        f"if(lte(t,{t3:.3f}),max(0,min({w_max},{res_w}-{res_w}*(t-{t2:.3f})/{t_bot:.3f}-{half_s})),0)))"
+                    )
+                    ly = (
+                        f"if(lte(t,{t1:.3f}),0,"
+                        f"if(lte(t,{t2:.3f}),min({h_max},max(0,{res_h}*(t-{t1:.3f})/{t_right:.3f}-{half_s})),"
+                        f"if(lte(t,{t3:.3f}),{h_max},"
+                        f"max(0,min({h_max},{res_h}-{res_h}*(t-{t3:.3f})/{t_left:.3f}-{half_s})))))"
+                    )
+
+                    print(f"Adding Perimeter-Riding Logo: {logo_url}")
+                    filters.append(f"{stream_idx}[{logo_input_idx}:v]overlay=x='{lx}':y='{ly}':shortest=1 [v_logo]")
+                    stream_idx = "[v_logo]"
             
         else: # neon_bottom
             filters.append(f"color=c={core_c}:s={res_w}x12 [c_bot]")
@@ -148,7 +206,7 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
             filters.append(f"{stream_idx}[c_bot]overlay=x='{x_bot}':y={res_h-12}:shortest=1 [v_prog]")
             stream_idx = "[v_prog]"
 
-    # 2. Add Subtitles
+    # 3. Add Subtitles
     raw_words = payload.get('words', [])
     if raw_words:
         sub_file = captions.generate_ass_subtitles(raw_words, caption_style=payload.get('caption_style', 'hormozi'), res_x=res_w, res_y=res_h)
@@ -165,6 +223,7 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
     
     cmd = [
         "ffmpeg", "-y", "-i", input_video,
+        *extra_inputs,
         "-filter_complex", filter_complex,
         "-map", stream_idx, "-map", "0:a?",
         "-c:v", "libx264", "-c:a", "copy", output_video
