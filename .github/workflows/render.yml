@@ -18,10 +18,10 @@ jobs:
           python-version: '3.12'
           cache: 'pip'
 
-      # Downloads static FFmpeg + FFprobe directly (Zero apt-get, takes ~1.5s)
-      - name: Install Static FFmpeg, FFprobe & Dependencies
+      # Fast native install: ONLY ffmpeg & ffprobe (No bloat, takes ~3s)
+      - name: Install FFmpeg and Dependencies
         run: |
-          curl -sL https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz | sudo tar -xJ --strip-components=1 -C /usr/local/bin/ --wildcards '*ffmpeg' '*ffprobe'
+          sudo apt-get install -y --no-install-recommends ffmpeg
           pip install -r requirements.txt
           if [ ! -f "font.ttf" ]; then
             wget -q https://github.com/google/fonts/raw/main/ofl/anton/Anton-Regular.ttf -O font.ttf
