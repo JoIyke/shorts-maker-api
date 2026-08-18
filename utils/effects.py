@@ -125,7 +125,7 @@ def build_waveform_filter(style="random", width=460, height=220):
         style = style.lower()
 
     # Pre-amp: Boosts audio feeding the visualizer by 3.5x for massive bounce
-    pre_amp = "volume=3.5,"
+    pre_amp = "volume=1.5,"
 
     if style == 'waves_cyan':
         wv_gen = f"{pre_amp}showwaves=s={width}x{height}:mode=p2p:scale=cbrt:draw=full:colors=0x00FFFF@0.95|0xFFFFFF@1.0"
