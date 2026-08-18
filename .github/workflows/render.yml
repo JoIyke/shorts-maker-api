@@ -11,17 +11,33 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # Sets up Python with fast pip caching
+      # 1. Check if static FFmpeg & FFprobe are already in GitHub Cache (0.4s)
+      - name: Cache Static FFmpeg & FFprobe
+        id: cache-ffmpeg
+        uses: actions/cache@v4
+        with:
+          path: |
+            /usr/local/bin/ffmpeg
+            /usr/local/bin/ffprobe
+          key: static-ffmpeg-v1
+
+      # 2. If not cached, download the pre-compiled static bundle (Takes ~1.5s once, then cached forever)
+      - name: Download Static FFmpeg & FFprobe (Zero apt-get)
+        if: steps.cache-ffmpeg.outputs.cache-hit != 'true'
+        run: |
+          echo "Downloading standalone static FFmpeg bundle..."
+          curl -sL https://github.com/yt-dlp/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz | sudo tar -xJ --strip-components=2 -C /usr/local/bin/ ffmpeg-master-latest-linux64-gpl/bin/ffmpeg ffmpeg-master-latest-linux64-gpl/bin/ffprobe
+          sudo chmod +x /usr/local/bin/ffmpeg /usr/local/bin/ffprobe
+
+      # 3. Python setup with pip caching
       - name: Set up Python with Caching
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
           cache: 'pip'
 
-      # Fast native install: ONLY ffmpeg & ffprobe (No bloat, takes ~3s)
-      - name: Install FFmpeg and Dependencies
+      - name: Install Python Packages and Fonts
         run: |
-          sudo apt-get install -y --no-install-recommends ffmpeg
           pip install -r requirements.txt
           if [ ! -f "font.ttf" ]; then
             wget -q https://github.com/google/fonts/raw/main/ofl/anton/Anton-Regular.ttf -O font.ttf
