@@ -12,7 +12,6 @@ VIBRANT_TRANSITIONS = [
 ]
 
 PROGRESS_COLORS = ['yellow', 'cyan', 'magenta', 'red', 'green', 'white']
-
 WAVEFORM_STYLES = ['bars_neon', 'waves_cyan', 'waves_fire', 'spectrum_dots', 'ahistogram_glow']
 
 def has_audio_stream(file_path):
@@ -104,7 +103,20 @@ def prepare_logo(logo_url, size=70):
         print(f"Warning: Failed to process logo ({e}).")
         return None
 
-def build_waveform_filter(style="random", width=460, height=240):
+def download_bgm(music_url):
+    """Downloads background music track."""
+    if not music_url:
+        return None
+    out_file = "bgm_track.mp3"
+    try:
+        print(f"Downloading Background Music: {music_url}")
+        subprocess.run(["yt-dlp", "-f", "bestaudio/best", "-o", out_file, music_url], check=True)
+        return out_file if os.path.exists(out_file) else None
+    except Exception as e:
+        print(f"Warning: Failed to download BGM ({e}). Skipping background music.")
+        return None
+
+def build_waveform_filter(style="random", width=460, height=220):
     """Generates dramatic, high-energy voice-reactive audio visualizers."""
     if not style or style == "random":
         style = random.choice(WAVEFORM_STYLES)
@@ -112,23 +124,18 @@ def build_waveform_filter(style="random", width=460, height=240):
     else:
         style = style.lower()
 
-    # Pre-amp: Boosts audio feeding the visualizer by 3.5x for massive, punchy bounce
-    pre_amp = "volume=1.5,"
+    # Pre-amp: Boosts audio feeding the visualizer by 3.5x for massive bounce
+    pre_amp = "volume=3.5,"
 
     if style == 'waves_cyan':
-        # Glowing double-amplitude voice envelope
         wv_gen = f"{pre_amp}showwaves=s={width}x{height}:mode=p2p:scale=cbrt:draw=full:colors=0x00FFFF@0.95|0xFFFFFF@1.0"
     elif style == 'waves_fire':
-        # Fiery neon peak envelope
         wv_gen = f"{pre_amp}showwaves=s={width}x{height}:mode=p2p:scale=cbrt:draw=full:colors=0xFF3300@0.95|0xFFFF00@1.0"
     elif style == 'spectrum_dots':
-        # Voice-focused floating particle dots
         wv_gen = f"{pre_amp}showfreqs=s={width}x{height}:mode=dot:fscale=log:fmin=80:fmax=4200:ascale=cbrt:colors=0x14FF39|0x00FFFF"
     elif style == 'ahistogram_glow':
-        # High-intensity spectral cloud
         wv_gen = f"{pre_amp}showwavespeaks=s={width}x{height}:mode=p2p:color=0x00FFFF|0xFF00FF"
     else: # bars_neon (default)
-        # Voice-focused equalizer bars spanning the full width
         wv_gen = f"{pre_amp}showfreqs=s={width}x{height}:mode=bar:fscale=log:fmin=80:fmax=4200:ascale=cbrt:colors=0x00FFFF|0xFF00FF"
 
     return f"{wv_gen},format=rgba,colorkey=0x000000:0.1:0.1[wv]"
@@ -136,7 +143,10 @@ def build_waveform_filter(style="random", width=460, height=240):
 def apply_post_processing(input_video, output_video, payload, total_duration, res_w=1080, res_h=1920):
     filters = []
     stream_idx = "[0:v]"
-    extra_inputs = []
+    
+    # Track extra input files and their exact 0-based stream indices
+    input_args = ["-i", input_video]
+    current_input_idx = 1
 
     # 1. Setup Progress Bar Animation
     prog_config = payload.get('progress_bar', True)
@@ -195,8 +205,9 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
                 logo_size = int(payload.get('logo_size', 70))
                 logo_file = prepare_logo(logo_url, size=logo_size)
                 if logo_file and os.path.exists(logo_file):
-                    extra_inputs.extend(["-i", logo_file])
-                    logo_input_idx = len(extra_inputs) // 2
+                    input_args.extend(["-i", logo_file])
+                    logo_in_idx = current_input_idx
+                    current_input_idx += 1
 
                     w_max = res_w - logo_size
                     h_max = res_h - logo_size
@@ -218,7 +229,7 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
                         f"max(0,min({h_max},{res_h}-{res_h}*(t-{t3:.3f})/{t_left:.3f}-{half_s})))))"
                     )
 
-                    filters.append(f"{stream_idx}[{logo_input_idx}:v]overlay=x='{lx}':y='{ly}':eof_action=repeat [v_logo]")
+                    filters.append(f"{stream_idx}[{logo_in_idx}:v]overlay=x='{lx}':y='{ly}':eof_action=repeat [v_logo]")
                     stream_idx = "[v_logo]"
             
         else: # neon_bottom
@@ -227,19 +238,18 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
             filters.append(f"{stream_idx}[c_bot]overlay=x='{x_bot}':y={res_h-12}:eof_action=repeat [v_prog]")
             stream_idx = "[v_prog]"
 
-    # 3. Transparent Floating Audio Waveform (If requested)
+    # 3. Transparent Floating Audio Waveform (High-Energy)
     wv_config = payload.get('waveform', False)
     if wv_config:
         wv_style = wv_config if isinstance(wv_config, str) else payload.get('waveform_style', 'random')
-        wv_width = int(res_w * 0.82)
-        wv_height = 160
+        wv_width = int(res_w * 0.85)
+        wv_height = 220
         wv_filter_str = build_waveform_filter(style=wv_style, width=wv_width, height=wv_height)
         
         filters.append(f"[0:a]{wv_filter_str}")
         
-        # Positioned cleanly above the subtitle space
         wv_x = f"(W-{wv_width})/2"
-        wv_y = int(res_h - (res_h * 0.15) - wv_height - 180)
+        wv_y = int(res_h - (res_h * 0.15) - wv_height - 190)
         
         filters.append(f"{stream_idx}[wv]overlay=x='{wv_x}':y={wv_y}:eof_action=repeat [v_wave]")
         stream_idx = "[v_wave]"
@@ -260,9 +270,9 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
             for h in unique_hexes:
                 f_png = emojis.fetch_emoji_png(h, size=140)
                 if f_png and os.path.exists(f_png):
-                    extra_inputs.extend(["-i", f_png])
-                    input_idx = len(extra_inputs) // 2
-                    emoji_file_map[h] = input_idx
+                    input_args.extend(["-i", f_png])
+                    emoji_file_map[h] = current_input_idx
+                    current_input_idx += 1
 
             emoji_size = 140
             base_y = int(res_h - (res_h * 0.15) - emoji_size - 90)
@@ -279,7 +289,7 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
                     elif c_len == 2:
                         offset = -160 if c_idx == 0 else 160
                         ex = int((res_w - emoji_size) / 2 + offset)
-                    else: # 3 words
+                    else:
                         if c_idx == 0:
                             offset = -240
                         elif c_idx == 1:
@@ -304,19 +314,52 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
             filters.append(f"{stream_idx}ass={sub_file} [vout]")
             stream_idx = "[vout]"
 
+    # 5. Background Music (BGM) with Smart Auto-Ducking
+    music_url = payload.get('music_url') or payload.get('bgm_url')
+    has_bgm = False
+    audio_map = "0:a?"
+
+    if music_url:
+        bgm_file = download_bgm(music_url)
+        if bgm_file:
+            input_args.extend(["-stream_loop", "-1", "-i", bgm_file])
+            bgm_idx = current_input_idx
+            current_input_idx += 1
+            has_bgm = True
+
+            music_vol = float(payload.get('music_volume', payload.get('bgm_volume', 0.10)))
+            auto_duck = payload.get('auto_ducking', payload.get('ducking', True))
+            print(f"Applying Background Music: Volume={music_vol:.2f} | Auto-Ducking={auto_duck}")
+
+            if auto_duck:
+                # SIDECHAIN DUCKING: Voice audio dynamically ducks the music volume
+                filters.append(f"[0:a]asplit=2[v_main][v_ctrl]")
+                filters.append(f"[{bgm_idx}:a]volume={music_vol}[bgm_base]")
+                filters.append(f"[bgm_base][v_ctrl]sidechaincompress=threshold=0.07:ratio=4:attack=20:release=350[bgm_ducked]")
+                filters.append(f"[v_main][bgm_ducked]amix=inputs=2:duration=first:dropout_transition=2[aout]")
+            else:
+                # Simple static volume mixing
+                filters.append(f"[{bgm_idx}:a]volume={music_vol}[bgm_base]")
+                filters.append(f"[0:a][bgm_base]amix=inputs=2:duration=first:dropout_transition=2[aout]")
+            
+            audio_map = "[aout]"
+
     if not filters:
         os.rename(input_video, output_video)
         return output_video
 
     filter_complex = ";".join(filters)
-    print(f"Applying Post-Processing Engine with Waveform & Floating Emojis...")
+    print(f"Applying Master Post-Processing Engine...")
     
     cmd = [
-        "ffmpeg", "-y", "-i", input_video,
-        *extra_inputs,
+        "ffmpeg", "-y",
+        *input_args,
         "-filter_complex", filter_complex,
-        "-map", stream_idx, "-map", "0:a?",
-        "-c:v", "libx264", "-c:a", "copy", output_video
+        "-map", stream_idx,
+        "-map", audio_map,
+        "-c:v", "libx264",
+        "-c:a", "aac",
+        output_video
     ]
     subprocess.run(cmd, check=True)
     return output_video
