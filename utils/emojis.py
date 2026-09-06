@@ -71,11 +71,21 @@ EMOJI_HEX_MAP = {
 }
 
 def get_emoji_hex(raw_word):
-    """Returns the hex code for a word if matched, else None."""
+    """Returns the hex code. Auto-converts raw emojis into Twemoji hex codes."""
     if not raw_word:
         return None
     cleaned = re.sub(r'[^\w\s]', '', str(raw_word)).strip().lower()
-    return EMOJI_HEX_MAP.get(cleaned, None)
+    val = EMOJI_HEX_MAP.get(cleaned, None)
+    
+    if not val:
+        return None
+        
+    # If the dictionary accidentally contains a raw emoji (like '👀'), convert it to hex!
+    if not all(ord(c) < 128 for c in val):
+        # Convert emoji to Twemoji format (stripping the hidden FE0F variation selector)
+        return "-".join(f"{ord(c):x}" for c in val if ord(c) != 0xfe0f)
+        
+    return val
 
 def fetch_emoji_png(hex_code, size=140):
     """Downloads high-res 140px color emoji PNG from Twemoji CDN and formats it."""
