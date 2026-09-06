@@ -42,11 +42,14 @@ def stitch_with_transitions(segment_files, segment_durations, transition_type="r
     for f in segment_files:
         inputs.extend(["-i", f])
 
+    # FIX: Normalize Timebase, Framerate, and Sample Rate across ALL inputs before fading!
     v_filter = ""
-    for i in range(len(segment_files)):
-        v_filter += f"[{i}:v]setpts=PTS-STARTPTS[vpts{i}];"
-
     a_filter = ""
+    for i in range(len(segment_files)):
+        v_filter += f"[{i}:v]settb=1/90000,fps=30,setpts=PTS-STARTPTS[vpts{i}];"
+        if has_audio:
+            a_filter += f"[{i}:a]aresample=44100,asetpts=PTS-STARTPTS[apts{i}];"
+
     cumulative_offset = segment_durations[0] - trans_dur
 
     for i in range(1, len(segment_files)):
@@ -60,8 +63,8 @@ def stitch_with_transitions(segment_files, segment_durations, transition_type="r
         v_filter += f"{v_in1}{v_in2}xfade=transition={current_t}:duration={trans_dur}:offset={cumulative_offset:.2f}{v_out};"
 
         if has_audio:
-            a_in1 = "[0:a]" if i == 1 else f"[a{i-1}]"
-            a_in2 = f"[{i}:a]"
+            a_in1 = "[apts0]" if i == 1 else f"[a{i-1}]"
+            a_in2 = f"[apts{i}]"
             a_out = f"[a{i}]" if i < len(segment_files) - 1 else "[aout]"
             a_filter += f"{a_in1}{a_in2}acrossfade=d={trans_dur}{a_out};"
 
@@ -104,7 +107,6 @@ def prepare_logo(logo_url, size=70):
         return None
 
 def download_bgm(music_url):
-    """Downloads background music track."""
     if not music_url:
         return None
     out_file = "bgm_track.mp3"
@@ -113,11 +115,10 @@ def download_bgm(music_url):
         subprocess.run(["yt-dlp", "-f", "bestaudio/best", "-o", out_file, music_url], check=True)
         return out_file if os.path.exists(out_file) else None
     except Exception as e:
-        print(f"Warning: Failed to download BGM ({e}). Skipping background music.")
+        print(f"Warning: Failed to download BGM ({e}).")
         return None
 
 def build_waveform_filter(style="random", width=920, height=220):
-    """Generates dramatic, high-energy voice-reactive audio visualizers."""
     if not style or style == "random":
         style = random.choice(WAVEFORM_STYLES)
         print(f"Random Dramatic Waveform Style Selected: '{style}'")
@@ -131,7 +132,6 @@ def build_waveform_filter(style="random", width=920, height=220):
     elif style == 'waves_fire':
         wv_gen = f"{pre_amp}showwaves=s={width}x{height}:mode=p2p:scale=cbrt:draw=full:colors=0xFF3300@0.95|0xFFFF00@1.0"
     elif style == 'spectrum_dots':
-        # FIXED: Removed unsupported fmin/fmax tags
         wv_gen = f"{pre_amp}showfreqs=s={width}x{height}:mode=dot:fscale=log:ascale=cbrt:colors=0x14FF39|0x00FFFF"
     elif style == 'ahistogram_glow':
         wv_gen = f"{pre_amp}showwavespeaks=s={width}x{height}:mode=p2p:color=0x00FFFF|0xFF00FF"
@@ -204,7 +204,6 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
                 logo_size = int(payload.get('logo_size', 70))
                 logo_file = prepare_logo(logo_url, size=logo_size)
                 if logo_file and os.path.exists(logo_file):
-                    # FIX: Added -loop 1 to suppress image sequence warnings
                     input_args.extend(["-loop", "1", "-i", logo_file])
                     logo_in_idx = current_input_idx
                     current_input_idx += 1
@@ -232,7 +231,7 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
                     filters.append(f"{stream_idx}[{logo_in_idx}:v]overlay=x='{lx}':y='{ly}':shortest=1 [v_logo]")
                     stream_idx = "[v_logo]"
             
-        else: # neon_bottom
+        else: 
             filters.append(f"color=c={core_c}:s={res_w}x12:r=30:d={total_duration} [c_bot]")
             x_bot = f"-{res_w}+{res_w}*min(t,{anim_dur})/{anim_dur}"
             filters.append(f"{stream_idx}[c_bot]overlay=x='{x_bot}':y={res_h-12}:eof_action=repeat [v_prog]")
@@ -270,7 +269,6 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
             for h in unique_hexes:
                 f_png = emojis.fetch_emoji_png(h, size=140)
                 if f_png and os.path.exists(f_png):
-                    # FIX: Added -loop 1 to prevent image sequence warnings
                     input_args.extend(["-loop", "1", "-i", f_png])
                     emoji_file_map[h] = current_input_idx
                     current_input_idx += 1
