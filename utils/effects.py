@@ -140,7 +140,7 @@ def build_waveform_filter(style="random", width=920, height=220):
 
     return f"{wv_gen},format=rgba,colorkey=0x000000:0.1:0.1[wv]"
 
-def apply_post_processing(input_video, output_video, payload, total_duration, res_w=1080, res_h=1920):
+def apply_post_processing(input_video, output_video, payload, total_duration, res_w=1080, res_h=1920, adjusted_words=None):
     filters = []
     stream_idx = "[0:v]"
     
@@ -254,10 +254,12 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
         stream_idx = "[v_wave]"
 
     # 4. Clean Subtitles & Animated Floating Emoji Stickers
-    raw_words = payload.get('words', [])
-    if raw_words:
+    # FIX: Use adjusted_words if provided!
+    words_to_burn = adjusted_words if adjusted_words is not None else payload.get('words', [])
+    
+    if words_to_burn:
         sub_file, emoji_events = captions.generate_ass_subtitles(
-            raw_words, 
+            words_to_burn, 
             caption_style=payload.get('caption_style', 'random'), 
             res_x=res_w, 
             res_y=res_h
@@ -326,7 +328,6 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
 
             music_vol = float(payload.get('music_volume', payload.get('bgm_volume', 0.10)))
             auto_duck = payload.get('auto_ducking', payload.get('ducking', True))
-            print(f"Applying Background Music: Volume={music_vol:.2f} | Auto-Ducking={auto_duck}")
 
             if auto_duck:
                 filters.append(f"[0:a]asplit=2[v_main][v_ctrl]")
