@@ -116,7 +116,7 @@ def download_bgm(music_url):
         print(f"Warning: Failed to download BGM ({e}). Skipping background music.")
         return None
 
-def build_waveform_filter(style="random", width=460, height=220):
+def build_waveform_filter(style="random", width=920, height=220):
     """Generates dramatic, high-energy voice-reactive audio visualizers."""
     if not style or style == "random":
         style = random.choice(WAVEFORM_STYLES)
@@ -124,19 +124,19 @@ def build_waveform_filter(style="random", width=460, height=220):
     else:
         style = style.lower()
 
-    # Pre-amp: Boosts audio feeding the visualizer by 3.5x for massive bounce
-    pre_amp = "volume=1.5,"
+    pre_amp = "volume=3.5,"
 
     if style == 'waves_cyan':
         wv_gen = f"{pre_amp}showwaves=s={width}x{height}:mode=p2p:scale=cbrt:draw=full:colors=0x00FFFF@0.95|0xFFFFFF@1.0"
     elif style == 'waves_fire':
         wv_gen = f"{pre_amp}showwaves=s={width}x{height}:mode=p2p:scale=cbrt:draw=full:colors=0xFF3300@0.95|0xFFFF00@1.0"
     elif style == 'spectrum_dots':
-        wv_gen = f"{pre_amp}showfreqs=s={width}x{height}:mode=dot:fscale=log:fmin=80:fmax=4200:ascale=cbrt:colors=0x14FF39|0x00FFFF"
+        # FIXED: Removed unsupported fmin/fmax tags
+        wv_gen = f"{pre_amp}showfreqs=s={width}x{height}:mode=dot:fscale=log:ascale=cbrt:colors=0x14FF39|0x00FFFF"
     elif style == 'ahistogram_glow':
         wv_gen = f"{pre_amp}showwavespeaks=s={width}x{height}:mode=p2p:color=0x00FFFF|0xFF00FF"
-    else: # bars_neon (default)
-        wv_gen = f"{pre_amp}showfreqs=s={width}x{height}:mode=bar:fscale=log:fmin=80:fmax=4200:ascale=cbrt:colors=0x00FFFF|0xFF00FF"
+    else: 
+        wv_gen = f"{pre_amp}showfreqs=s={width}x{height}:mode=bar:fscale=log:ascale=cbrt:colors=0x00FFFF|0xFF00FF"
 
     return f"{wv_gen},format=rgba,colorkey=0x000000:0.1:0.1[wv]"
 
@@ -144,7 +144,6 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
     filters = []
     stream_idx = "[0:v]"
     
-    # Track extra input files and their exact 0-based stream indices
     input_args = ["-i", input_video]
     current_input_idx = 1
 
@@ -205,7 +204,8 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
                 logo_size = int(payload.get('logo_size', 70))
                 logo_file = prepare_logo(logo_url, size=logo_size)
                 if logo_file and os.path.exists(logo_file):
-                    input_args.extend(["-i", logo_file])
+                    # FIX: Added -loop 1 to suppress image sequence warnings
+                    input_args.extend(["-loop", "1", "-i", logo_file])
                     logo_in_idx = current_input_idx
                     current_input_idx += 1
 
@@ -229,7 +229,7 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
                         f"max(0,min({h_max},{res_h}-{res_h}*(t-{t3:.3f})/{t_left:.3f}-{half_s})))))"
                     )
 
-                    filters.append(f"{stream_idx}[{logo_in_idx}:v]overlay=x='{lx}':y='{ly}':eof_action=repeat [v_logo]")
+                    filters.append(f"{stream_idx}[{logo_in_idx}:v]overlay=x='{lx}':y='{ly}':shortest=1 [v_logo]")
                     stream_idx = "[v_logo]"
             
         else: # neon_bottom
@@ -238,7 +238,7 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
             filters.append(f"{stream_idx}[c_bot]overlay=x='{x_bot}':y={res_h-12}:eof_action=repeat [v_prog]")
             stream_idx = "[v_prog]"
 
-    # 3. Transparent Floating Audio Waveform (High-Energy)
+    # 3. Transparent Floating Audio Waveform
     wv_config = payload.get('waveform', False)
     if wv_config:
         wv_style = wv_config if isinstance(wv_config, str) else payload.get('waveform_style', 'random')
@@ -270,7 +270,8 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
             for h in unique_hexes:
                 f_png = emojis.fetch_emoji_png(h, size=140)
                 if f_png and os.path.exists(f_png):
-                    input_args.extend(["-i", f_png])
+                    # FIX: Added -loop 1 to prevent image sequence warnings
+                    input_args.extend(["-loop", "1", "-i", f_png])
                     emoji_file_map[h] = current_input_idx
                     current_input_idx += 1
 
@@ -306,7 +307,7 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
                     filters.append(
                         f"{stream_idx}[{in_idx}:v]overlay="
                         f"x={ex}:y='{bounce_y}':"
-                        f"enable='between(t,{s_t:.3f},{e_t:.3f})':eof_action=repeat {out_tag}"
+                        f"enable='between(t,{s_t:.3f},{e_t:.3f})':shortest=1 {out_tag}"
                     )
                     stream_idx = out_tag
 
@@ -314,9 +315,8 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
             filters.append(f"{stream_idx}ass={sub_file} [vout]")
             stream_idx = "[vout]"
 
-    # 5. Background Music (BGM) with Smart Auto-Ducking
+    # 5. Background Music (BGM) with Auto-Ducking
     music_url = payload.get('music_url') or payload.get('bgm_url')
-    has_bgm = False
     audio_map = "0:a?"
 
     if music_url:
@@ -325,20 +325,17 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
             input_args.extend(["-stream_loop", "-1", "-i", bgm_file])
             bgm_idx = current_input_idx
             current_input_idx += 1
-            has_bgm = True
 
             music_vol = float(payload.get('music_volume', payload.get('bgm_volume', 0.10)))
             auto_duck = payload.get('auto_ducking', payload.get('ducking', True))
             print(f"Applying Background Music: Volume={music_vol:.2f} | Auto-Ducking={auto_duck}")
 
             if auto_duck:
-                # SIDECHAIN DUCKING: Voice audio dynamically ducks the music volume
                 filters.append(f"[0:a]asplit=2[v_main][v_ctrl]")
                 filters.append(f"[{bgm_idx}:a]volume={music_vol}[bgm_base]")
                 filters.append(f"[bgm_base][v_ctrl]sidechaincompress=threshold=0.07:ratio=4:attack=20:release=350[bgm_ducked]")
                 filters.append(f"[v_main][bgm_ducked]amix=inputs=2:duration=first:dropout_transition=2[aout]")
             else:
-                # Simple static volume mixing
                 filters.append(f"[{bgm_idx}:a]volume={music_vol}[bgm_base]")
                 filters.append(f"[0:a][bgm_base]amix=inputs=2:duration=first:dropout_transition=2[aout]")
             
