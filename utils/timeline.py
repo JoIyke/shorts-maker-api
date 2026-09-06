@@ -25,10 +25,12 @@ def process_timeline(payload, design_module):
     rendered_segments = []
     segment_durations = []
     
-    # 1. Download Main Video
+    design_name = payload.get('design', 'crop')
+
+    # 1. Download Main Media
     subprocess.run(["yt-dlp", "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best", "-o", raw_video, payload['url']], check=True)
     
-    if payload.get('design') == 'brain_rot' and payload.get('bottom_url'):
+    if design_name == 'brain_rot' and payload.get('bottom_url'):
         payload['bottom_file'] = "bottom.mp4"
         subprocess.run(["yt-dlp", "-f", "bestvideo[ext=mp4]/best", "-o", payload['bottom_file'], payload['bottom_url']], check=True)
 
@@ -42,7 +44,6 @@ def process_timeline(payload, design_module):
     adjusted_words = []
     raw_words = payload.get('words', [])
 
-    # A. Hook
     if payload.get('hook'):
         h_start, h_end = extract_bounds(payload['hook'])
         h_file, h_dur = render_part(h_start, h_end, "hook")
@@ -50,7 +51,6 @@ def process_timeline(payload, design_module):
         segment_durations.append(h_dur)
         cumulative_offset_ms += (h_dur * 1000)
 
-    # B. Intro
     if payload.get('intro_url'):
         intro_file = "intro_rendered.mp4"
         subprocess.run(["yt-dlp", "-f", "bestvideo[ext=mp4]/best", "-o", "raw_intro.mp4", payload['intro_url']], check=True)
@@ -58,7 +58,6 @@ def process_timeline(payload, design_module):
         rendered_segments.append(intro_file)
         segment_durations.append(3.0)
 
-    # C. Body Clips
     clips = payload.get('clips', [])
     for idx, clip in enumerate(clips):
         c_start, c_end = extract_bounds(clip)
@@ -83,7 +82,6 @@ def process_timeline(payload, design_module):
 
         cumulative_offset_ms += (c_dur * 1000)
 
-    # D. Outro
     if payload.get('outro_url'):
         outro_file = "outro_rendered.mp4"
         subprocess.run(["yt-dlp", "-f", "bestvideo[ext=mp4]/best", "-o", "raw_outro.mp4", payload['outro_url']], check=True)
@@ -91,17 +89,23 @@ def process_timeline(payload, design_module):
         rendered_segments.append(outro_file)
         segment_durations.append(3.0)
 
-# 2. Stitch with Vibrant Transitions (Default: 'random')
+    # 2. Stitch Segments (Enforce 'none' transition if RAW cut)
     transition_style = payload.get('transition', 'random')
+    if design_name == 'raw_cut':
+        transition_style = 'none'
+
     stitched_file = "stitched_master.mp4"
     effects.stitch_with_transitions(rendered_segments, segment_durations, transition_type=transition_style, output_file=stitched_file)
 
-# 3. Post-Processing: Progress Bar Perimeter & Captions
-    # FIX: Subtract the time lost to transition overlaps!
-    overlap_duration = 0.4 if transition_style != 'none' else 0.0
-    total_video_duration = sum(segment_durations) - (max(0, len(segment_durations) - 1) * overlap_duration)
-    
+    # 3. Post-Processing
     final_output = "output.mp4"
-    effects.apply_post_processing(stitched_file, final_output, payload, total_video_duration)
 
-    print("Pipeline Complete! Video ready.")
+    # If it's a Raw Cut, skip all visual styling and return the stitched file
+    if design_name == 'raw_cut':
+        os.rename(stitched_file, final_output)
+        print("Raw Cut Pipeline Complete! Media ready.")
+    else:
+        overlap_duration = 0.4 if transition_style != 'none' else 0.0
+        total_video_duration = sum(segment_durations) - (max(0, len(segment_durations) - 1) * overlap_duration)
+        effects.apply_post_processing(stitched_file, final_output, payload, total_video_duration)
+        print("Pipeline Complete! Video ready.")
