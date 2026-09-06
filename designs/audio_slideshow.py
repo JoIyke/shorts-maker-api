@@ -37,13 +37,15 @@ def render(payload, output_file="output.mp4"):
         payload['url']
     ], check=True)
 
-    # 3. Smart Silence Removal (If requested)
+    # 3. Smart Silence Removal & Strip Album Art
+    # FIX: Added '-vn' to completely drop hidden video tracks (album art) which crash FFmpeg!
     if payload.get('remove_silence', False):
         print("Smart Silence Trimming: Removing dead air and pauses > 0.4s...")
-        silence_filter = "silenceremove=start_periods=1:start_duration=0.1:start_threshold=-35dB:stop_periods=-1:stop_duration=1:stop_threshold=-35dB"
-        subprocess.run(["ffmpeg", "-y", "-i", raw_audio, "-af", silence_filter, "-c:a", "aac", audio_file], check=True)
+        silence_filter = "silenceremove=start_periods=1:start_duration=0.1:start_threshold=-35dB:stop_periods=-1:stop_duration=0.4:stop_threshold=-35dB"
+        subprocess.run(["ffmpeg", "-y", "-i", raw_audio, "-vn", "-af", silence_filter, "-c:a", "aac", audio_file], check=True)
     else:
-        os.rename(raw_audio, audio_file)
+        print("Extracting pure audio track (stripping album art)...")
+        subprocess.run(["ffmpeg", "-y", "-i", raw_audio, "-vn", "-c:a", "aac", audio_file], check=True)
 
     total_audio_duration = get_media_duration(audio_file)
     print(f"Total audio duration: {total_audio_duration:.2f}s")
