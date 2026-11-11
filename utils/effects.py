@@ -36,19 +36,28 @@ def stitch_with_transitions(segment_files, segment_durations, transition_type="r
         subprocess.run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", concat_list, "-c", "copy", output_file], check=True)
         return output_file
 
-    has_audio = has_audio_stream(segment_files[0])
+    # FIX: Check audio status for EVERY individual file!
+    file_audio_status = [has_audio_stream(f) for f in segment_files]
+    global_has_audio = any(file_audio_status)
+
     trans_dur = 0.4
     inputs = []
     for f in segment_files:
         inputs.extend(["-i", f])
 
-    # FIX: Normalize Timebase, Framerate, and Sample Rate across ALL inputs before fading!
     v_filter = ""
     a_filter = ""
-    for i in range(len(segment_files)):
+    
+    for i, f in enumerate(segment_files):
         v_filter += f"[{i}:v]settb=1/90000,fps=30,setpts=PTS-STARTPTS[vpts{i}];"
-        if has_audio:
-            a_filter += f"[{i}:a]aresample=44100,asetpts=PTS-STARTPTS[apts{i}];"
+        
+        if global_has_audio:
+            if file_audio_status[i]:
+                a_filter += f"[{i}:a]aresample=44100,asetpts=PTS-STARTPTS[apts{i}];"
+            else:
+                # FIX: If this clip is missing audio, generate a dummy silent track for it!
+                dur = segment_durations[i]
+                a_filter += f"anullsrc=r=44100:cl=stereo:d={dur}[apts{i}];"
 
     cumulative_offset = segment_durations[0] - trans_dur
 
@@ -62,7 +71,7 @@ def stitch_with_transitions(segment_files, segment_durations, transition_type="r
         
         v_filter += f"{v_in1}{v_in2}xfade=transition={current_t}:duration={trans_dur}:offset={cumulative_offset:.2f}{v_out};"
 
-        if has_audio:
+        if global_has_audio:
             a_in1 = "[apts0]" if i == 1 else f"[a{i-1}]"
             a_in2 = f"[apts{i}]"
             a_out = f"[a{i}]" if i < len(segment_files) - 1 else "[aout]"
@@ -78,7 +87,7 @@ def stitch_with_transitions(segment_files, segment_durations, transition_type="r
         "-filter_complex", filter_complex,
         "-map", "[vout]", "-c:v", "libx264"
     ]
-    if has_audio:
+    if global_has_audio:
         ffmpeg_cmd.extend(["-map", "[aout]", "-c:a", "aac"])
     ffmpeg_cmd.append(output_file)
 
@@ -254,7 +263,6 @@ def apply_post_processing(input_video, output_video, payload, total_duration, re
         stream_idx = "[v_wave]"
 
     # 4. Clean Subtitles & Animated Floating Emoji Stickers
-    # FIX: Use adjusted_words if provided!
     words_to_burn = adjusted_words if adjusted_words is not None else payload.get('words', [])
     
     if words_to_burn:
