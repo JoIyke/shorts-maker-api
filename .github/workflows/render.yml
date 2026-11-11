@@ -38,7 +38,7 @@ jobs:
 
       - name: Install Python Packages and Fonts
         run: |
-          pip install -r requirements.txt
+          pip install -U -r requirements.txt
           if [ ! -f "font.ttf" ]; then
             wget -q https://github.com/google/fonts/raw/main/ofl/anton/Anton-Regular.ttf -O font.ttf
           fi
